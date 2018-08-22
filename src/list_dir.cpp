@@ -17,9 +17,9 @@ int ls_dir(const char* dir)
 {
     struct dirent **entry_list;
     struct dirent *entry;
-    struct stat entry_stat;                // to retrive the stats of the file/directory
-    struct passwd *pUser;               // to determine the file/directory owner
-    struct group *pGroup;               // to determine the file/directory group
+    struct stat entry_stat;          // to retrive the stats of the file/directory
+    struct passwd *pUser;            // to determine the file/directory owner
+    struct group *pGroup;            // to determine the file/directory group
 
     char buf[512];
     char ret_time[26];
@@ -57,13 +57,12 @@ int ls_dir(const char* dir)
         pUser = getpwuid(entry_stat.st_uid);
         printf("  %s ", pUser->pw_name);
 
-        //[group]
+        // [group]
         // http://linux.die.net/man/3/getgrgid
         pGroup = getgrgid(entry_stat.st_gid);
         printf("  %s ", pGroup->gr_name);
 
-        //And the easy-cheesy part
-        //[size in bytes] [time of last modification] [filename]
+        // [size in bytes] [time of last modification] [filename]
         printf("%-5ld",entry_stat.st_size);
         strcpy(ret_time, ctime(&entry_stat.st_mtime));
         ret_time[24] = '\0';
