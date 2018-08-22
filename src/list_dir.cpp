@@ -1,6 +1,7 @@
 #include <sys/stat.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <dirent.h>
 #include <time.h>
 #include <pwd.h>
@@ -21,6 +22,7 @@ int ls_dir(const char* dir)
     struct group *pGroup;               // to determine the file/directory group
 
     char buf[512];
+    char ret_time[26];
 
     int n = scandir(dir, &entry_list, NULL, alphasort);
     if(n == FAILURE)
@@ -63,8 +65,10 @@ int ls_dir(const char* dir)
         //And the easy-cheesy part
         //[size in bytes] [time of last modification] [filename]
         printf("%-5ld",entry_stat.st_size);
-        printf(" %s", ctime(&entry_stat.st_mtime));
-        printf("\b %-20s", entry->d_name);
+        strcpy(ret_time, ctime(&entry_stat.st_mtime));
+        ret_time[24] = '\0';
+        printf(" %s", ret_time);
+        printf(" %-20s\n", entry->d_name);
         free(entry_list[i]);
     }
     free(entry_list);
@@ -74,5 +78,4 @@ int ls_dir(const char* dir)
 int main(int argc, char* argv[])
 {
     return ls_dir(argv[1]);
-    //closedir(thedirectory);
 }
