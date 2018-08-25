@@ -10,9 +10,13 @@
 #include <termios.h>
 #include <unistd.h>
 #include <signal.h>
+#include "utility.h"
+#include <sys/wait.h>
 
 #include <iostream>
 #include <algorithm>
+#include <string>
+#include <list>
 using namespace std;
 
 #define FAILURE -1
@@ -22,9 +26,20 @@ static struct winsize w;
 int curr_i_beg, curr_i_end;
 char curr_dir[512], working_dir[512];
 struct dirent **entry_list;
-int n, entry_idx, v_row;
+int n, entry_idx, cursor_r_pos;
 
-void print_dir_range(char* working_dir, struct dirent **entry_list, int i_begin, int i_end, int cursor_r);
+struct dir_content
+{
+    int no_lines;
+    string name;
+    string content_line;
+
+    dir_content(): no_lines(1) {}
+};
+
+void print_dir_range(char* working_dir, int i_begin, int i_end, int cursor_r);
+
+static list<dir_content> content_list;
 
 void t_win_resize_handler(int sig)
 {
@@ -32,38 +47,45 @@ void t_win_resize_handler(int sig)
     curr_i_beg = 0;
     curr_i_end = min(curr_i_beg + w.ws_row, n);
     entry_idx = 0;
-    print_dir_range(working_dir, entry_list, curr_i_beg, curr_i_end, 1);
+    //print_dir_range(working_dir, curr_i_beg, curr_i_end, 1);
 }
 
-bool move_cursor_h(int r, int dr)
+bool move_cursor_r(int r, int dr)
 {
     bool ret = false;
     r += dr;
     if(r < 1)
     {
-        v_row = 1;
+        cursor_r_pos = 1;
         ret = true;
+    }
+    else if (r > content_list.size())
+    {
+        cursor_r_pos = content_list.size();
     }
     else if(r > w.ws_row)
     {
-        v_row = w.ws_row;
+        cursor_r_pos = w.ws_row;
         ret = true;
     }
     else
-        v_row = r;
+    {
+        cursor_r_pos = r;
+    }
 
-    cout << "\033[" << v_row << ";" << 1 << "H";
+    cout << "\033[" << cursor_r_pos << ";" << 1 << "H";
     return ret;
 }
 
 inline void clear_screen()
 {
     cout << "\033[3J" << "\033[2J" << "\033[H\033[J";
-    move_cursor_h(1, 0);
+    move_cursor_r(1, 0);
 }
 
-void print_dir_range(char* working_dir, struct dirent **entry_list, int i_begin, int i_end, int cursor_r)
+void create_content_list(string &working_dir)
 {
+    struct dirent **entry_list;
     struct dirent *entry;
     struct stat entry_stat;          // to retrive the stats of the file/directory
     struct passwd *pUser;            // to determine the file/directory owner
@@ -71,54 +93,75 @@ void print_dir_range(char* working_dir, struct dirent **entry_list, int i_begin,
 
     char buf[512], ret_time[26];
 
-    clear_screen();
+    int n = scandir(working_dir.c_str(), &entry_list, NULL, alphasort);
+    if(n == FAILURE)
+    {
+        cout << "Scandir() failed!!\n";
+        return;
+    }
 
-    //printf("Working Directory %s\n", working_dir);
-    for(int i = i_begin; i < i_end; ++i)
+    content_list.clear();
+    for(int i = 0; i < n; ++i)
     {
         // "dir/entry" defines the path to the entry
         entry = entry_list[i];
-        sprintf(buf, "%s/%s", working_dir, entry->d_name);
+        sprintf(buf, "%s/%s", working_dir.c_str(), entry->d_name);
         stat(buf, &entry_stat);            // retrieve information about the entry
+
+        dir_content dc;
 
         // [permissions] [owner] [group] [size in bytes] [time of last modification] [filename]
 
         // [permissions]
         // http://linux.die.net/man/2/chmod 
-        printf( (entry_stat.st_mode & S_IRUSR) ? "r" : " -");
-        printf( (entry_stat.st_mode & S_IWUSR) ? "w" : "-");
-        printf( (entry_stat.st_mode & S_IXUSR) ? "x" : "-");
-        printf( (entry_stat.st_mode & S_IRGRP) ? "r" : "-");
-        printf( (entry_stat.st_mode & S_IWGRP) ? "w" : "-");
-        printf( (entry_stat.st_mode & S_IXGRP) ? "x" : "-");
-        printf( (entry_stat.st_mode & S_IROTH) ? "r" : "-");
-        printf( (entry_stat.st_mode & S_IWOTH) ? "w" : "-");
-        printf( (entry_stat.st_mode & S_IXOTH) ? "x" : "-");
+        dc.content_line += (entry_stat.st_mode & S_IRUSR) ? "r" : "-";
+        dc.content_line += (entry_stat.st_mode & S_IWUSR) ? "w" : "-";
+        dc.content_line += (entry_stat.st_mode & S_IXUSR) ? "x" : "-";
+        dc.content_line += (entry_stat.st_mode & S_IRGRP) ? "r" : "-";
+        dc.content_line += (entry_stat.st_mode & S_IWGRP) ? "w" : "-";
+        dc.content_line += (entry_stat.st_mode & S_IXGRP) ? "x" : "-";
+        dc.content_line += (entry_stat.st_mode & S_IROTH) ? "r" : "-";
+        dc.content_line += (entry_stat.st_mode & S_IWOTH) ? "w" : "-";
+        dc.content_line += (entry_stat.st_mode & S_IXOTH) ? "x" : "-";
 
         // [owner] 
         // http://linux.die.net/man/3/getpwuid
         pUser = getpwuid(entry_stat.st_uid);
-        printf("  %s ", pUser->pw_name);
+        dc.content_line = dc.content_line + "  " + pUser->pw_name + " ";
 
         // [group]
         // http://linux.die.net/man/3/getgrgid
         pGroup = getgrgid(entry_stat.st_gid);
-        printf("  %s ", pGroup->gr_name);
+        dc.content_line = dc.content_line + "  " + pGroup->gr_name + " ";
 
         // [size in bytes] [time of last modification] [filename]
-        printf("%-5ld",entry_stat.st_size);
+        dc.content_line = dc.content_line + to_string(entry_stat.st_size) + " ";
         strcpy(ret_time, ctime(&entry_stat.st_mtime));
         ret_time[24] = '\0';
-        printf(" %s", ret_time);
-        if(i == i_end-1)
-        {
-            printf(" %-20s", entry->d_name);
-            fflush(stdout);
-        }
-        else
-            printf(" %-20s\n", entry->d_name);
+        dc.content_line = dc.content_line + ret_time + " ";
+        dc.content_line = dc.content_line + entry->d_name;
+
+        dc.name = entry->d_name;
+        content_list.pb(dc);
+        free(entry_list[i]);
+        entry_list[i] = NULL;
     }
-    move_cursor_h(cursor_r, 0);
+    free(entry_list);
+    entry_list = NULL;
+}
+
+int print_content_list(list<dir_content>::const_iterator itr)
+{
+    int nWin_rows = w.ws_row;
+    clear_screen();
+
+    int nRows_printed;
+    for(nRows_printed = 0; nRows_printed < nWin_rows && itr != content_list.end(); ++nRows_printed, ++itr)
+    {
+        cout << itr->content_line;
+        move_cursor_r(++cursor_r_pos, 0);
+    }
+    return nRows_printed;
 }
 
 int ls_dir(const char* dir)
@@ -129,10 +172,9 @@ int ls_dir(const char* dir)
     newt.c_lflag &= ~( ICANON | ECHO );
     tcsetattr( STDIN_FILENO, TCSANOW, &newt);
 
-    //struct dirent **entry_list;
-
-    //char curr_dir[512], working_dir[512];
-    snprintf(working_dir, strlen(dir) + 1, "%s", dir);
+    //char curr_dir[512];
+    string working_dir(dir);
+    //snprintf(working_dir, strlen(dir) + 1, "%s", dir);
 
     ioctl(0, TIOCGWINSZ, &w);
 
@@ -141,21 +183,13 @@ int ls_dir(const char* dir)
         bool done = false;
         char ch;
 
-        n = scandir(working_dir, &entry_list, NULL, alphasort);
-        if(n == FAILURE)
-        {
-            cout << "Scandir() failed!!\n";
-            return FAILURE;
-        }
-
-        entry_idx = 0;
-        curr_i_beg = 0;
-        curr_i_end = min(curr_i_beg + w.ws_row, n);
-        print_dir_range(working_dir, entry_list, curr_i_beg, curr_i_end, 1);
+        create_content_list(working_dir);
+        auto current_itr = content_list.begin();
+        print_content_list(current_itr);
+        move_cursor_r(1, 0);
 
         while(!done)
         {
-            move_cursor_h(v_row, 0);
             ch = getchar();
             switch(ch)
             {
@@ -165,21 +199,22 @@ int ls_dir(const char* dir)
                     switch(ch) 
                     { 
                         case 'A':       // up
-                            entry_idx = max(entry_idx-1, 0);
-                            if(move_cursor_h(v_row, -1))
+                            if(move_cursor_r(cursor_r_pos, -1))
                             {
-                                curr_i_beg = max(curr_i_beg - 1, 0);
-                                curr_i_end = min(curr_i_beg + w.ws_row, n);
-                                print_dir_range(working_dir, entry_list, curr_i_beg, curr_i_end, v_row);
+                                if(current_itr != content_list.begin())
+                                {
+                                    --current_itr;
+                                    print_content_list(current_itr);
+                                    move_cursor_r(1, 0);
+                                }
                             }
                             break;
                         case 'B':       // down
-                            entry_idx = min(entry_idx+1, n-1);
-                            if(move_cursor_h(v_row, 1))
+                            if(move_cursor_r(cursor_r_pos, 1))
                             {
-                                curr_i_beg = min(curr_i_beg + 1, n-1);
-                                curr_i_end = min(curr_i_beg + w.ws_row, n);
-                                print_dir_range(working_dir, entry_list, curr_i_beg, curr_i_end, v_row);
+                                ++current_itr;
+                                cursor_r_pos = print_content_list(current_itr);
+                                move_cursor_r(cursor_r_pos, 0);
                             }
                             break;
                         default:
@@ -202,19 +237,12 @@ int ls_dir(const char* dir)
             }
         }
 
-#if 0
-        cout << "\033[3J";
-        cout << "\033[2J";
-        cout << "\033[H\033[J";
-        cout << "\033[" << 0 << ";" << 0 << "H";
-#endif
+        auto selection_itr = current_itr;
+        advance(selection_itr, cursor_r_pos - 1);
+        working_dir = working_dir + "/" + selection_itr->name;
 
-        snprintf(curr_dir, sizeof(curr_dir), "%s", working_dir);
-        snprintf(working_dir, sizeof(working_dir), "%s/%s", curr_dir, entry_list[entry_idx]->d_name);
-
-        for(int i = 0; i < n; ++i)
-            free(entry_list[i]);
-        free(entry_list);
+        //snprintf(curr_dir, sizeof(curr_dir), "%s", working_dir);
+        //snprintf(working_dir, sizeof(working_dir), "%s/%s", curr_dir, entry_list[entry_idx]->d_name);
     }
 
     return SUCCESS;
