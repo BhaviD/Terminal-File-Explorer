@@ -23,10 +23,8 @@ using namespace std;
 #define SUCCESS 0
 
 static struct winsize w;
-int curr_i_beg, curr_i_end;
-char curr_dir[512], working_dir[512];
 struct dirent **entry_list;
-int n, entry_idx, cursor_r_pos;
+int n, cursor_r_pos;
 
 struct dir_content
 {
@@ -37,17 +35,27 @@ struct dir_content
     dir_content(): no_lines(1) {}
 };
 
-void print_dir_range(char* working_dir, int i_begin, int i_end, int cursor_r);
+int print_content_list(list<dir_content>::const_iterator itr);
+bool move_cursor_r(int r, int dr);
 
 static list<dir_content> content_list;
+static list<dir_content>::const_iterator current_itr;
 
 void t_win_resize_handler(int sig)
 {
     ioctl(0, TIOCGWINSZ, &w);
-    curr_i_beg = 0;
-    curr_i_end = min(curr_i_beg + w.ws_row, n);
-    entry_idx = 0;
-    //print_dir_range(working_dir, curr_i_beg, curr_i_end, 1);
+    int cursor_pos_save = 0;
+    if(cursor_r_pos < (w.ws_row/2))
+        cursor_pos_save = cursor_r_pos;
+    else
+        advance(current_itr, cursor_r_pos - (w.ws_row/2) - 1);
+
+    print_content_list(current_itr);
+
+    if(cursor_pos_save)
+        move_cursor_r(cursor_pos_save, 0);
+    else
+        move_cursor_r(w.ws_row/2, 0);
 }
 
 bool move_cursor_r(int r, int dr)
@@ -74,12 +82,14 @@ bool move_cursor_r(int r, int dr)
     }
 
     cout << "\033[" << cursor_r_pos << ";" << 1 << "H";
+    cout.flush();
     return ret;
 }
 
 inline void clear_screen()
 {
     cout << "\033[3J" << "\033[2J" << "\033[H\033[J";
+    cout.flush();
     move_cursor_r(1, 0);
 }
 
@@ -159,6 +169,7 @@ int print_content_list(list<dir_content>::const_iterator itr)
     for(nRows_printed = 0; nRows_printed < nWin_rows && itr != content_list.end(); ++nRows_printed, ++itr)
     {
         cout << itr->content_line;
+        cout.flush();
         move_cursor_r(++cursor_r_pos, 0);
     }
     return nRows_printed;
@@ -172,9 +183,7 @@ int ls_dir(const char* dir)
     newt.c_lflag &= ~( ICANON | ECHO );
     tcsetattr( STDIN_FILENO, TCSANOW, &newt);
 
-    //char curr_dir[512];
     string working_dir(dir);
-    //snprintf(working_dir, strlen(dir) + 1, "%s", dir);
 
     ioctl(0, TIOCGWINSZ, &w);
 
@@ -184,7 +193,7 @@ int ls_dir(const char* dir)
         char ch;
 
         create_content_list(working_dir);
-        auto current_itr = content_list.begin();
+        current_itr = content_list.begin();
         print_content_list(current_itr);
         move_cursor_r(1, 0);
 
@@ -240,9 +249,6 @@ int ls_dir(const char* dir)
         auto selection_itr = current_itr;
         advance(selection_itr, cursor_r_pos - 1);
         working_dir = working_dir + "/" + selection_itr->name;
-
-        //snprintf(curr_dir, sizeof(curr_dir), "%s", working_dir);
-        //snprintf(working_dir, sizeof(working_dir), "%s/%s", curr_dir, entry_list[entry_idx]->d_name);
     }
 
     return SUCCESS;
