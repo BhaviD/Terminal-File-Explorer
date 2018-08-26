@@ -12,6 +12,7 @@
 #include <signal.h>
 #include "utility.h"
 #include <sys/wait.h>
+#include <cstddef>         // std::size_t
 
 #include <iostream>
 #include <algorithm>
@@ -21,10 +22,18 @@ using namespace std;
 
 #define FAILURE -1
 #define SUCCESS 0
+#define FIRST_ROW_NUM 1
+#define BOTTOM_OFFSET 1
+#define TOP_OFFSET 1
+
+#define l_itr(T) list<T>::iterator
+#define l_citr(T) list<T>::const_iterator
 
 static struct winsize w;
 struct dirent **entry_list;
-int n, cursor_r_pos;
+int n, cursor_r_pos = 1;
+static string root_dir;
+static string working_dir;
 
 struct dir_content
 {
@@ -37,9 +46,18 @@ struct dir_content
 
 int print_content_list(list<dir_content>::const_iterator itr);
 bool move_cursor_r(int r, int dr);
+void cursor_init();
 
 static list<dir_content> content_list;
-static list<dir_content>::const_iterator current_itr;
+static l_citr(dir_content) start_itr;
+static l_citr(dir_content) prev_selection_itr;
+static l_citr(dir_content) selection_itr;
+
+void print_highlighted_line()
+{
+    cout << "\033[1;33;40m" << selection_itr->content_line << "\033[0m";
+    cursor_init();
+}
 
 void t_win_resize_handler(int sig)
 {
@@ -48,9 +66,9 @@ void t_win_resize_handler(int sig)
     if(cursor_r_pos < (w.ws_row/2))
         cursor_pos_save = cursor_r_pos;
     else
-        advance(current_itr, cursor_r_pos - (w.ws_row/2) - 1);
+        advance(start_itr, cursor_r_pos - (w.ws_row/2) - 1);
 
-    print_content_list(current_itr);
+    print_content_list(start_itr);
 
     if(cursor_pos_save)
         move_cursor_r(cursor_pos_save, 0);
@@ -58,31 +76,63 @@ void t_win_resize_handler(int sig)
         move_cursor_r(w.ws_row/2, 0);
 }
 
+inline void cursor_init()
+{
+    cout << "\033[" << cursor_r_pos << ";" << 1 << "H";
+    cout.flush();
+}
+
 bool move_cursor_r(int r, int dr)
 {
     bool ret = false;
-    r += dr;
-    if(r < 1)
-    {
-        cursor_r_pos = 1;
-        ret = true;
-    }
-    else if (r > content_list.size())
-    {
-        cursor_r_pos = content_list.size();
-    }
-    else if(r > w.ws_row)
-    {
-        cursor_r_pos = w.ws_row;
-        ret = true;
-    }
-    else
+    if(dr == 0)
     {
         cursor_r_pos = r;
     }
+    else if(dr < 0)
+    {
+        if(selection_itr == content_list.begin())
+            return false;
 
-    cout << "\033[" << cursor_r_pos << ";" << 1 << "H";
-    cout.flush();
+        prev_selection_itr = selection_itr;
+        --selection_itr;
+
+        if(r + dr >= FIRST_ROW_NUM)
+        {
+            cursor_r_pos = r + dr;
+        }
+        else
+        {
+            cursor_r_pos = FIRST_ROW_NUM;
+            ret = true;
+        }
+    }
+    else if(dr > 0)
+    {
+        ++selection_itr;
+        if(selection_itr == content_list.end())
+        {
+            --selection_itr;
+            return false;
+        }
+
+        --selection_itr;
+        prev_selection_itr = selection_itr;
+        ++selection_itr;
+
+        if(r + dr <= w.ws_row)
+        {
+            cursor_r_pos = r + dr;
+        }
+        else
+        {
+            cursor_r_pos = w.ws_row;
+            ret = true;
+        }
+    }
+
+    cout << prev_selection_itr->content_line;
+    cursor_init();
     return ret;
 }
 
@@ -90,7 +140,8 @@ inline void clear_screen()
 {
     cout << "\033[3J" << "\033[2J" << "\033[H\033[J";
     cout.flush();
-    move_cursor_r(1, 0);
+    cursor_r_pos = 1;
+    cursor_init();
 }
 
 void create_content_list(string &working_dir)
@@ -166,24 +217,26 @@ int print_content_list(list<dir_content>::const_iterator itr)
     clear_screen();
 
     int nRows_printed;
-    for(nRows_printed = 0; nRows_printed < nWin_rows && itr != content_list.end(); ++nRows_printed, ++itr)
+    cout << "\033[1;105m" << "Working Directory: " << working_dir << "\033[0m";
+    ++cursor_r_pos;
+    cursor_init();
+    for(nRows_printed = TOP_OFFSET; nRows_printed < nWin_rows - BOTTOM_OFFSET && itr != content_list.end(); ++nRows_printed, ++itr)
     {
         cout << itr->content_line;
-        cout.flush();
-        move_cursor_r(++cursor_r_pos, 0);
+        //cout.flush();
+        ++cursor_r_pos;
+        cursor_init();
     }
     return nRows_printed;
 }
 
-int ls_dir(const char* dir)
+int ls_dir()
 {
     struct termios oldt, newt;
     tcgetattr(STDIN_FILENO, &oldt);
     newt = oldt;
     newt.c_lflag &= ~( ICANON | ECHO );
     tcsetattr( STDIN_FILENO, TCSANOW, &newt);
-
-    string working_dir(dir);
 
     ioctl(0, TIOCGWINSZ, &w);
 
@@ -193,9 +246,15 @@ int ls_dir(const char* dir)
         char ch;
 
         create_content_list(working_dir);
-        current_itr = content_list.begin();
-        print_content_list(current_itr);
-        move_cursor_r(1, 0);
+
+        start_itr = content_list.begin();
+        selection_itr = start_itr;
+        prev_selection_itr = content_list.end();
+
+        print_content_list(start_itr);
+        cursor_r_pos = TOP_OFFSET + 1;
+        cursor_init();
+        print_highlighted_line();
 
         while(!done)
         {
@@ -210,21 +269,24 @@ int ls_dir(const char* dir)
                         case 'A':       // up
                             if(move_cursor_r(cursor_r_pos, -1))
                             {
-                                if(current_itr != content_list.begin())
+                                if(start_itr != content_list.begin())
                                 {
-                                    --current_itr;
-                                    print_content_list(current_itr);
-                                    move_cursor_r(1, 0);
+                                    --start_itr;
+                                    print_content_list(start_itr);
+                                    cursor_r_pos = 1;
+                                    cursor_init();
                                 }
                             }
+                            print_highlighted_line();
                             break;
                         case 'B':       // down
                             if(move_cursor_r(cursor_r_pos, 1))
                             {
-                                ++current_itr;
-                                cursor_r_pos = print_content_list(current_itr);
-                                move_cursor_r(cursor_r_pos, 0);
+                                ++start_itr;
+                                cursor_r_pos = print_content_list(start_itr);
+                                cursor_init();
                             }
+                            print_highlighted_line();
                             break;
                         default:
                             break;
@@ -246,9 +308,20 @@ int ls_dir(const char* dir)
             }
         }
 
-        auto selection_itr = current_itr;
-        advance(selection_itr, cursor_r_pos - 1);
-        working_dir = working_dir + "/" + selection_itr->name;
+        if(selection_itr->name == ".")
+            continue;
+        if(selection_itr->name == "..")
+        {
+            if(working_dir == root_dir)
+                continue;
+
+            size_t fwd_slash_pos = working_dir.find_last_of("/");
+            working_dir = working_dir.substr(0, fwd_slash_pos);
+        }
+        else
+        {
+            working_dir = working_dir + "/" + selection_itr->name;
+        }
     }
 
     return SUCCESS;
@@ -258,8 +331,9 @@ int main(int argc, char* argv[])
 {
     signal (SIGWINCH, t_win_resize_handler);
 
-    if(argc == 1)
-        return ls_dir(".");
+    getchar();
+    root_dir = getenv("PWD");
+    working_dir = root_dir;
 
-    return ls_dir(argv[1]);
+    return ls_dir();
 }
