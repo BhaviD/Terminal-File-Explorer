@@ -18,13 +18,21 @@
 #include <algorithm>
 #include <string>
 #include <list>
+#include <stack>
 using namespace std;
 
-#define FAILURE -1
-#define SUCCESS 0
-#define FIRST_ROW_NUM 1
-#define BOTTOM_OFFSET 1
-#define TOP_OFFSET 1
+#define FAILURE        -1
+#define SUCCESS        0
+#define FIRST_ROW_NUM  1
+#define BOTTOM_OFFSET  1
+#define TOP_OFFSET     1
+#define ENTER          10
+#define ESC            27
+#define UP             65
+#define DOWN           66
+#define RIGHT          67
+#define LEFT           68
+#define BACKSPACE      127
 
 #define l_itr(T) list<T>::iterator
 #define l_citr(T) list<T>::const_iterator
@@ -34,6 +42,9 @@ struct dirent **entry_list;
 int n, cursor_r_pos = 1;
 static string root_dir;
 static string working_dir;
+
+stack<string> bwd_stack;
+stack<string> fwd_stack;
 
 struct dir_content
 {
@@ -55,7 +66,7 @@ static l_citr(dir_content) selection_itr;
 
 void print_highlighted_line()
 {
-    cout << "\033[1;33;40m" << selection_itr->content_line << "\033[0m";
+    cout << "\033[1;33;105m" << selection_itr->content_line << "\033[0m";
     cursor_init();
 }
 
@@ -97,13 +108,13 @@ bool move_cursor_r(int r, int dr)
         prev_selection_itr = selection_itr;
         --selection_itr;
 
-        if(r + dr >= FIRST_ROW_NUM)
+        if(r + dr >= FIRST_ROW_NUM + TOP_OFFSET)
         {
             cursor_r_pos = r + dr;
         }
         else
         {
-            cursor_r_pos = FIRST_ROW_NUM;
+            cursor_r_pos = FIRST_ROW_NUM + TOP_OFFSET;
             ret = true;
         }
     }
@@ -120,13 +131,13 @@ bool move_cursor_r(int r, int dr)
         prev_selection_itr = selection_itr;
         ++selection_itr;
 
-        if(r + dr <= w.ws_row)
+        if(r + dr <= w.ws_row - BOTTOM_OFFSET)
         {
             cursor_r_pos = r + dr;
         }
         else
         {
-            cursor_r_pos = w.ws_row;
+            cursor_r_pos = w.ws_row - BOTTOM_OFFSET;
             ret = true;
         }
     }
@@ -173,6 +184,17 @@ void create_content_list(string &working_dir)
 
         // [permissions] [owner] [group] [size in bytes] [time of last modification] [filename]
 
+        switch (entry_stat.st_mode & S_IFMT) {
+            case S_IFBLK:  dc.content_line += "b"; break;
+            case S_IFCHR:  dc.content_line += "c"; break; 
+            case S_IFDIR:  dc.content_line += "d"; break; // It's a (sub)directory 
+            case S_IFIFO:  dc.content_line += "p"; break; // fifo
+            case S_IFLNK:  dc.content_line += "l"; break; // Sym link
+            case S_IFSOCK: dc.content_line += "s"; break;
+                           // Filetype isn't identified
+            default:       dc.content_line += "-"; break;
+        }
+
         // [permissions]
         // http://linux.die.net/man/2/chmod 
         dc.content_line += (entry_stat.st_mode & S_IRUSR) ? "r" : "-";
@@ -211,13 +233,24 @@ void create_content_list(string &working_dir)
     entry_list = NULL;
 }
 
+void print_mode()
+{
+    cursor_r_pos = w.ws_row;
+    cursor_init();
+    cout << "\033[1;33;40m" << "-- NORMAL MODE --" << "\033[0m";
+    cout.flush();
+}
+
 int print_content_list(list<dir_content>::const_iterator itr)
 {
     int nWin_rows = w.ws_row;
     clear_screen();
 
     int nRows_printed;
-    cout << "\033[1;105m" << "Working Directory: " << working_dir << "\033[0m";
+    if(working_dir == root_dir)
+        cout << "\033[1;33;40m" << "PWD: ~/" << "\033[0m";
+    else
+        cout << "\033[1;33;40m" << "PWD: ~/" << working_dir.substr(root_dir.length()) << "\033[0m";
     ++cursor_r_pos;
     cursor_init();
     for(nRows_printed = TOP_OFFSET; nRows_printed < nWin_rows - BOTTOM_OFFSET && itr != content_list.end(); ++nRows_printed, ++itr)
@@ -227,10 +260,11 @@ int print_content_list(list<dir_content>::const_iterator itr)
         ++cursor_r_pos;
         cursor_init();
     }
+    print_mode();
     return nRows_printed;
 }
 
-int ls_dir()
+int run()
 {
     struct termios oldt, newt;
     tcgetattr(STDIN_FILENO, &oldt);
@@ -261,25 +295,26 @@ int ls_dir()
             ch = getchar();
             switch(ch)
             {
-                case 27:            // if the first value is esc
+                case ESC:
                     getchar();      // skip the [
                     ch = getchar();
                     switch(ch) 
                     { 
-                        case 'A':       // up
+                        case UP:
                             if(move_cursor_r(cursor_r_pos, -1))
                             {
                                 if(start_itr != content_list.begin())
                                 {
                                     --start_itr;
                                     print_content_list(start_itr);
-                                    cursor_r_pos = 1;
+                                    cursor_r_pos = FIRST_ROW_NUM + TOP_OFFSET;
                                     cursor_init();
                                 }
                             }
                             print_highlighted_line();
                             break;
-                        case 'B':       // down
+
+                        case DOWN:
                             if(move_cursor_r(cursor_r_pos, 1))
                             {
                                 ++start_itr;
@@ -288,42 +323,60 @@ int ls_dir()
                             }
                             print_highlighted_line();
                             break;
+
                         default:
                             break;
 #if 0
-                        case 'C':       // right
+                        case RIGHT:       // right
                             break;
-                        case 'D':       // left
+                        case LEFT:       // left
                             break;
 #endif
                     }
                     break;
 
-                case 10:
+                case ENTER:                // <enter>
+                    if(selection_itr->name == ".")
+                        continue;
+                    if(selection_itr->name == "..")
+                    {
+                        if(working_dir != root_dir)
+                        {
+                            working_dir = working_dir.substr(0, working_dir.length() - 1);
+                            size_t fwd_slash_pos = working_dir.find_last_of("/");
+                            working_dir = working_dir.substr(0, fwd_slash_pos + 1);
+                        }
+                    }
+                    else
+                    {
+                        working_dir = working_dir + selection_itr->name + "/";
+                    }
                     done = true;
                     break;
+
+                case 'h':
+                case 'H':
+                    working_dir = root_dir;
+                    done = true;
+                    break;
+
+                case BACKSPACE:
+                {
+                    if(working_dir != root_dir)
+                    {
+                        working_dir = working_dir.substr(0, working_dir.length() - 1);
+                        size_t fwd_slash_pos = working_dir.find_last_of("/");
+                        working_dir = working_dir.substr(0, fwd_slash_pos + 1);
+                    }
+                    done = true;
+                    break;
+                }
 
                 default:
                     break;
             }
         }
-
-        if(selection_itr->name == ".")
-            continue;
-        if(selection_itr->name == "..")
-        {
-            if(working_dir == root_dir)
-                continue;
-
-            size_t fwd_slash_pos = working_dir.find_last_of("/");
-            working_dir = working_dir.substr(0, fwd_slash_pos);
-        }
-        else
-        {
-            working_dir = working_dir + "/" + selection_itr->name;
-        }
     }
-
     return SUCCESS;
 }
 
@@ -333,7 +386,9 @@ int main(int argc, char* argv[])
 
     getchar();
     root_dir = getenv("PWD");
+    if(root_dir != "/")
+        root_dir = root_dir + "/";
     working_dir = root_dir;
 
-    return ls_dir();
+    return run();
 }
