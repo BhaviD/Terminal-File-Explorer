@@ -147,9 +147,10 @@ bool move_cursor_r(int r, int dr)
     return ret;
 }
 
-inline void clear_screen()
+inline void screen_clear()
 {
-    cout << "\033[3J" << "\033[2J" << "\033[H\033[J";
+    //cout << "\033[3J" << "\033[2J" << "\033[H\033[J";
+    cout << "\033[3J" << "\033[H\033[J";
     cout.flush();
     cursor_r_pos = 1;
     cursor_init();
@@ -182,7 +183,7 @@ void create_content_list(string &working_dir)
 
         dir_content dc;
 
-        // [permissions] [owner] [group] [size in bytes] [time of last modification] [filename]
+        // [file-type] [permissions] [owner] [group] [size in bytes] [time of last modification] [filename]
 
         switch (entry_stat.st_mode & S_IFMT) {
             case S_IFBLK:  dc.content_line += "b"; break;
@@ -244,7 +245,7 @@ void print_mode()
 int print_content_list(list<dir_content>::const_iterator itr)
 {
     int nWin_rows = w.ws_row;
-    clear_screen();
+    screen_clear();
 
     int nRows_printed;
     if(working_dir == root_dir)
@@ -256,12 +257,16 @@ int print_content_list(list<dir_content>::const_iterator itr)
     for(nRows_printed = TOP_OFFSET; nRows_printed < nWin_rows - BOTTOM_OFFSET && itr != content_list.end(); ++nRows_printed, ++itr)
     {
         cout << itr->content_line;
-        //cout.flush();
         ++cursor_r_pos;
         cursor_init();
     }
     print_mode();
     return nRows_printed;
+}
+
+inline void stack_clear(stack<string> &s)
+{
+    while(!s.empty()) s.pop();
 }
 
 int run()
@@ -324,24 +329,42 @@ int run()
                             print_highlighted_line();
                             break;
 
+                        case RIGHT:
+                            if(!fwd_stack.empty())
+                            {
+                                bwd_stack.push(working_dir);
+                                working_dir = fwd_stack.top();
+                                fwd_stack.pop();
+                            }
+                            done = true;
+                            break;
+
+                        case LEFT:
+                            if(!bwd_stack.empty())
+                            {
+                                fwd_stack.push(working_dir);
+                                working_dir = bwd_stack.top();
+                                bwd_stack.pop();
+                            }
+                            done = true;
+                            break;
+
                         default:
                             break;
-#if 0
-                        case RIGHT:       // right
-                            break;
-                        case LEFT:       // left
-                            break;
-#endif
                     }
                     break;
 
                 case ENTER:                // <enter>
                     if(selection_itr->name == ".")
                         continue;
+
                     if(selection_itr->name == "..")
                     {
                         if(working_dir != root_dir)
                         {
+                            stack_clear(fwd_stack);
+                            bwd_stack.push(working_dir);
+
                             working_dir = working_dir.substr(0, working_dir.length() - 1);
                             size_t fwd_slash_pos = working_dir.find_last_of("/");
                             working_dir = working_dir.substr(0, fwd_slash_pos + 1);
@@ -349,6 +372,9 @@ int run()
                     }
                     else
                     {
+                        stack_clear(fwd_stack);
+                        bwd_stack.push(working_dir);
+
                         working_dir = working_dir + selection_itr->name + "/";
                     }
                     done = true;
@@ -356,7 +382,13 @@ int run()
 
                 case 'h':
                 case 'H':
-                    working_dir = root_dir;
+                    if(working_dir != root_dir)
+                    {
+                        stack_clear(fwd_stack);
+                        bwd_stack.push(working_dir);
+                        
+                        working_dir = root_dir;
+                    }
                     done = true;
                     break;
 
@@ -364,6 +396,9 @@ int run()
                 {
                     if(working_dir != root_dir)
                     {
+                        stack_clear(fwd_stack);
+                        bwd_stack.push(working_dir);
+
                         working_dir = working_dir.substr(0, working_dir.length() - 1);
                         size_t fwd_slash_pos = working_dir.find_last_of("/");
                         working_dir = working_dir.substr(0, fwd_slash_pos + 1);
