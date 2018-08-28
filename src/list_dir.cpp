@@ -36,15 +36,14 @@ using namespace std;
 #define LEFT           68
 #define BACKSPACE      127
 #define COLON          58
-#define ONE_K             (1024)
-#define ONE_M             (1024*1024)
-#define ONE_G             (1024*1024*1024)
+#define ONE_K          (1024)
+#define ONE_M          (1024*1024)
+#define ONE_G          (1024*1024*1024)
 
 #define l_itr(T) list<T>::iterator
 #define l_citr(T) list<T>::const_iterator
 
 static struct winsize w;
-struct dirent **entry_list;
 int n, cursor_r_pos = 1;
 static string root_dir;
 static string working_dir;
@@ -161,7 +160,6 @@ bool move_cursor_r(int r, int dr)
 
 inline void screen_clear()
 {
-    //cout << "\033[3J" << "\033[2J" << "\033[H\033[J";
     cout << "\033[3J" << "\033[H\033[J";
     cout.flush();
     cursor_r_pos = 1;
@@ -175,7 +173,6 @@ string human_readable_size_get(off_t size)
         stringstream stream;
         stream << setw(7) << size << "K";
         return stream.str();
-        //return to_string(size);
     }
     else if ((size / ONE_M) == 0)
     {
@@ -202,16 +199,16 @@ string human_readable_size_get(off_t size)
 
 void content_list_create(string &working_dir)
 {
-    struct dirent **entry_list;
-    struct dirent *entry;
-    struct stat entry_stat;          // to retrive the stats of the file/directory
+    struct dirent **dir_entry_arr;
+    struct dirent *dir_entry;
+    struct stat dir_entry_stat;          // to retrive the stats of the file/directory
     struct passwd *pUser;            // to determine the file/directory owner
     struct group *pGroup;            // to determine the file/directory group
 
-    char /*buf[512], */ret_time[26];
-    string buf;
+    //char ret_time[26];
+    string last_modified_time, dir_entry_path;
 
-    int n = scandir(working_dir.c_str(), &entry_list, NULL, alphasort);
+    int n = scandir(working_dir.c_str(), &dir_entry_arr, NULL, alphasort);
     if(n == FAILURE)
     {
         cout << "Scandir() failed!!\n";
@@ -221,66 +218,71 @@ void content_list_create(string &working_dir)
     content_list.clear();
     for(int i = 0; i < n; ++i)
     {
-        // "dir/entry" defines the path to the entry
-        entry = entry_list[i];
-        buf = working_dir + entry->d_name + "/";
-        stat(buf.c_str(), &entry_stat);            // retrieve information about the entry
+        dir_entry = dir_entry_arr[i];
 
-        dir_content dc;
+        if(((string)dir_entry->d_name) != "." && ((string)dir_entry->d_name) != ".." &&
+           dir_entry->d_name[0] == '.')
+        {
+            continue;
+        }
+
+        dir_entry_path = working_dir + dir_entry->d_name;   // "working_dir/dir_entry" defines the path to the entry
+        stat(dir_entry_path.c_str(), &dir_entry_stat);      // retrieve information about the entry
+
         stringstream ss;
 
         // [file-type] [permissions] [owner] [group] [size in bytes] [time of last modification] [filename]
-
-        switch (entry_stat.st_mode & S_IFMT) {
+        switch (dir_entry_stat.st_mode & S_IFMT) {
             case S_IFBLK:  ss << "b"; break;
             case S_IFCHR:  ss << "c"; break; 
             case S_IFDIR:  ss << "d"; break; // It's a (sub)directory 
             case S_IFIFO:  ss << "p"; break; // fifo
             case S_IFLNK:  ss << "l"; break; // Sym link
             case S_IFSOCK: ss << "s"; break;
-                           // Filetype isn't identified
-            default:       ss << "-"; break;
+            default:       ss << "-"; break; // Filetype isn't identified
         }
  
         // [permissions]
         // http://linux.die.net/man/2/chmod 
-        ss << ((entry_stat.st_mode & S_IRUSR) ? "r" : "-");
-        ss << ((entry_stat.st_mode & S_IWUSR) ? "w" : "-");
-        ss << ((entry_stat.st_mode & S_IXUSR) ? "x" : "-");
-        ss << ((entry_stat.st_mode & S_IRGRP) ? "r" : "-");
-        ss << ((entry_stat.st_mode & S_IWGRP) ? "w" : "-");
-        ss << ((entry_stat.st_mode & S_IXGRP) ? "x" : "-");
-        ss << ((entry_stat.st_mode & S_IROTH) ? "r" : "-");
-        ss << ((entry_stat.st_mode & S_IWOTH) ? "w" : "-");
-        ss << ((entry_stat.st_mode & S_IXOTH) ? "x" : "-");
+        ss << ((dir_entry_stat.st_mode & S_IRUSR) ? "r" : "-");
+        ss << ((dir_entry_stat.st_mode & S_IWUSR) ? "w" : "-");
+        ss << ((dir_entry_stat.st_mode & S_IXUSR) ? "x" : "-");
+        ss << ((dir_entry_stat.st_mode & S_IRGRP) ? "r" : "-");
+        ss << ((dir_entry_stat.st_mode & S_IWGRP) ? "w" : "-");
+        ss << ((dir_entry_stat.st_mode & S_IXGRP) ? "x" : "-");
+        ss << ((dir_entry_stat.st_mode & S_IROTH) ? "r" : "-");
+        ss << ((dir_entry_stat.st_mode & S_IWOTH) ? "w" : "-");
+        ss << ((dir_entry_stat.st_mode & S_IXOTH) ? "x" : "-");
 
 
         // [owner] 
         // http://linux.die.net/man/3/getpwuid
-        pUser = getpwuid(entry_stat.st_uid);
+        pUser = getpwuid(dir_entry_stat.st_uid);
         ss << "  " << left << setw(12) << pUser->pw_name;
 
         // [group]
         // http://linux.die.net/man/3/getgrgid
-        pGroup = getgrgid(entry_stat.st_gid);
+        pGroup = getgrgid(dir_entry_stat.st_gid);
         ss << "  " << setw(12) << pGroup->gr_name;
 
         // [size in bytes] [time of last modification] [filename]
-        ss << " " << human_readable_size_get(entry_stat.st_size);
+        ss << " " << human_readable_size_get(dir_entry_stat.st_size);
         
-        strcpy(ret_time, ctime(&entry_stat.st_mtime));
-        ret_time[24] = '\0';
-        ss << "  " << ret_time;
-        ss << "  " << entry->d_name;
+        last_modified_time = ctime(&dir_entry_stat.st_mtime);
+        last_modified_time[last_modified_time.length() - 1] = '\0';
+        ss << "  " << last_modified_time;
+        ss << "  " << dir_entry->d_name;
 
-        dc.name = entry->d_name;
+        dir_content dc;
+        dc.name = dir_entry->d_name;
         dc.content_line = ss.str();
         content_list.pb(dc);
-        free(entry_list[i]);
-        entry_list[i] = NULL;
+
+        free(dir_entry_arr[i]);
+        dir_entry_arr[i] = NULL;
     }
-    free(entry_list);
-    entry_list = NULL;
+    free(dir_entry_arr);
+    dir_entry_arr = NULL;
 }
 
 void print_mode(Mode m)
