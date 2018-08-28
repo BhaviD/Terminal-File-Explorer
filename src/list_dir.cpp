@@ -19,6 +19,8 @@
 #include <string>
 #include <list>
 #include <stack>
+#include <iomanip>         // setprecision
+#include <sstream>         // stringstream
 using namespace std;
 
 #define FAILURE        -1
@@ -33,6 +35,10 @@ using namespace std;
 #define RIGHT          67
 #define LEFT           68
 #define BACKSPACE      127
+#define COLON          58
+#define ONE_K             (1024)
+#define ONE_M             (1024*1024)
+#define ONE_G             (1024*1024*1024)
 
 #define l_itr(T) list<T>::iterator
 #define l_citr(T) list<T>::const_iterator
@@ -46,6 +52,12 @@ static string working_dir;
 stack<string> bwd_stack;
 stack<string> fwd_stack;
 
+enum Mode
+{
+    MODE_NORMAL,
+    MODE_COMMAND
+};
+
 struct dir_content
 {
     int no_lines;
@@ -55,7 +67,7 @@ struct dir_content
     dir_content(): no_lines(1) {}
 };
 
-int print_content_list(list<dir_content>::const_iterator itr);
+int content_list_print(list<dir_content>::const_iterator itr);
 bool move_cursor_r(int r, int dr);
 void cursor_init();
 
@@ -79,7 +91,7 @@ void t_win_resize_handler(int sig)
     else
         advance(start_itr, cursor_r_pos - (w.ws_row/2) - 1);
 
-    print_content_list(start_itr);
+    content_list_print(start_itr);
 
     if(cursor_pos_save)
         move_cursor_r(cursor_pos_save, 0);
@@ -156,7 +168,39 @@ inline void screen_clear()
     cursor_init();
 }
 
-void create_content_list(string &working_dir)
+string human_readable_size_get(off_t size)
+{
+    if((size / ONE_K) == 0)
+    {
+        stringstream stream;
+        stream << setw(7) << size << "K";
+        return stream.str();
+        //return to_string(size);
+    }
+    else if ((size / ONE_M) == 0)
+    {
+        double sz = (double) size / ONE_K;
+        stringstream stream;
+        stream << fixed << setprecision(1) << setw(7) << sz << "K";
+        return stream.str();
+    }
+    else if ((size / ONE_G) == 0)
+    {
+        double sz = (double) size / ONE_M;
+        stringstream stream;
+        stream << fixed << setprecision(1) << setw(7) << sz << "M";
+        return stream.str();
+    }
+    else
+    {
+        double sz = (double) size / ONE_G;
+        stringstream stream;
+        stream << fixed << setprecision(1) << setw(7) << sz << "G";
+        return stream.str();
+    }
+}
+
+void content_list_create(string &working_dir)
 {
     struct dirent **entry_list;
     struct dirent *entry;
@@ -164,7 +208,8 @@ void create_content_list(string &working_dir)
     struct passwd *pUser;            // to determine the file/directory owner
     struct group *pGroup;            // to determine the file/directory group
 
-    char buf[512], ret_time[26];
+    char /*buf[512], */ret_time[26];
+    string buf;
 
     int n = scandir(working_dir.c_str(), &entry_list, NULL, alphasort);
     if(n == FAILURE)
@@ -178,54 +223,58 @@ void create_content_list(string &working_dir)
     {
         // "dir/entry" defines the path to the entry
         entry = entry_list[i];
-        sprintf(buf, "%s/%s", working_dir.c_str(), entry->d_name);
-        stat(buf, &entry_stat);            // retrieve information about the entry
+        buf = working_dir + entry->d_name + "/";
+        stat(buf.c_str(), &entry_stat);            // retrieve information about the entry
 
         dir_content dc;
+        stringstream ss;
 
         // [file-type] [permissions] [owner] [group] [size in bytes] [time of last modification] [filename]
 
         switch (entry_stat.st_mode & S_IFMT) {
-            case S_IFBLK:  dc.content_line += "b"; break;
-            case S_IFCHR:  dc.content_line += "c"; break; 
-            case S_IFDIR:  dc.content_line += "d"; break; // It's a (sub)directory 
-            case S_IFIFO:  dc.content_line += "p"; break; // fifo
-            case S_IFLNK:  dc.content_line += "l"; break; // Sym link
-            case S_IFSOCK: dc.content_line += "s"; break;
+            case S_IFBLK:  ss << "b"; break;
+            case S_IFCHR:  ss << "c"; break; 
+            case S_IFDIR:  ss << "d"; break; // It's a (sub)directory 
+            case S_IFIFO:  ss << "p"; break; // fifo
+            case S_IFLNK:  ss << "l"; break; // Sym link
+            case S_IFSOCK: ss << "s"; break;
                            // Filetype isn't identified
-            default:       dc.content_line += "-"; break;
+            default:       ss << "-"; break;
         }
-
+ 
         // [permissions]
         // http://linux.die.net/man/2/chmod 
-        dc.content_line += (entry_stat.st_mode & S_IRUSR) ? "r" : "-";
-        dc.content_line += (entry_stat.st_mode & S_IWUSR) ? "w" : "-";
-        dc.content_line += (entry_stat.st_mode & S_IXUSR) ? "x" : "-";
-        dc.content_line += (entry_stat.st_mode & S_IRGRP) ? "r" : "-";
-        dc.content_line += (entry_stat.st_mode & S_IWGRP) ? "w" : "-";
-        dc.content_line += (entry_stat.st_mode & S_IXGRP) ? "x" : "-";
-        dc.content_line += (entry_stat.st_mode & S_IROTH) ? "r" : "-";
-        dc.content_line += (entry_stat.st_mode & S_IWOTH) ? "w" : "-";
-        dc.content_line += (entry_stat.st_mode & S_IXOTH) ? "x" : "-";
+        ss << ((entry_stat.st_mode & S_IRUSR) ? "r" : "-");
+        ss << ((entry_stat.st_mode & S_IWUSR) ? "w" : "-");
+        ss << ((entry_stat.st_mode & S_IXUSR) ? "x" : "-");
+        ss << ((entry_stat.st_mode & S_IRGRP) ? "r" : "-");
+        ss << ((entry_stat.st_mode & S_IWGRP) ? "w" : "-");
+        ss << ((entry_stat.st_mode & S_IXGRP) ? "x" : "-");
+        ss << ((entry_stat.st_mode & S_IROTH) ? "r" : "-");
+        ss << ((entry_stat.st_mode & S_IWOTH) ? "w" : "-");
+        ss << ((entry_stat.st_mode & S_IXOTH) ? "x" : "-");
+
 
         // [owner] 
         // http://linux.die.net/man/3/getpwuid
         pUser = getpwuid(entry_stat.st_uid);
-        dc.content_line = dc.content_line + "  " + pUser->pw_name + " ";
+        ss << "  " << left << setw(12) << pUser->pw_name;
 
         // [group]
         // http://linux.die.net/man/3/getgrgid
         pGroup = getgrgid(entry_stat.st_gid);
-        dc.content_line = dc.content_line + "  " + pGroup->gr_name + " ";
+        ss << "  " << setw(12) << pGroup->gr_name;
 
         // [size in bytes] [time of last modification] [filename]
-        dc.content_line = dc.content_line + to_string(entry_stat.st_size) + " ";
+        ss << " " << human_readable_size_get(entry_stat.st_size);
+        
         strcpy(ret_time, ctime(&entry_stat.st_mtime));
         ret_time[24] = '\0';
-        dc.content_line = dc.content_line + ret_time + " ";
-        dc.content_line = dc.content_line + entry->d_name;
+        ss << "  " << ret_time;
+        ss << "  " << entry->d_name;
 
         dc.name = entry->d_name;
+        dc.content_line = ss.str();
         content_list.pb(dc);
         free(entry_list[i]);
         entry_list[i] = NULL;
@@ -234,15 +283,24 @@ void create_content_list(string &working_dir)
     entry_list = NULL;
 }
 
-void print_mode()
+void print_mode(Mode m)
 {
     cursor_r_pos = w.ws_row;
     cursor_init();
-    cout << "\033[1;33;40m" << "-- NORMAL MODE --" << "\033[0m";
+    switch(m)
+    {
+        case MODE_NORMAL:
+        default:
+            cout << "\033[1;33;40m" << "-- NORMAL MODE --" << "\033[0m";
+            break;
+        case MODE_COMMAND:
+            cout << "\033[1;33;40m" << "-- COMMAND MODE --" << "\033[0m";
+            break;
+    }
     cout.flush();
 }
 
-int print_content_list(list<dir_content>::const_iterator itr)
+int content_list_print(list<dir_content>::const_iterator itr)
 {
     int nWin_rows = w.ws_row;
     screen_clear();
@@ -260,7 +318,7 @@ int print_content_list(list<dir_content>::const_iterator itr)
         ++cursor_r_pos;
         cursor_init();
     }
-    print_mode();
+    print_mode(MODE_NORMAL);
     return nRows_printed;
 }
 
@@ -284,13 +342,13 @@ int run()
         bool done = false;
         char ch;
 
-        create_content_list(working_dir);
+        content_list_create(working_dir);
 
         start_itr = content_list.begin();
         selection_itr = start_itr;
         prev_selection_itr = content_list.end();
 
-        print_content_list(start_itr);
+        content_list_print(start_itr);
         cursor_r_pos = TOP_OFFSET + 1;
         cursor_init();
         print_highlighted_line();
@@ -311,7 +369,7 @@ int run()
                                 if(start_itr != content_list.begin())
                                 {
                                     --start_itr;
-                                    print_content_list(start_itr);
+                                    content_list_print(start_itr);
                                     cursor_r_pos = FIRST_ROW_NUM + TOP_OFFSET;
                                     cursor_init();
                                 }
@@ -323,7 +381,7 @@ int run()
                             if(move_cursor_r(cursor_r_pos, 1))
                             {
                                 ++start_itr;
-                                cursor_r_pos = print_content_list(start_itr);
+                                cursor_r_pos = content_list_print(start_itr);
                                 cursor_init();
                             }
                             print_highlighted_line();
@@ -406,6 +464,10 @@ int run()
                     done = true;
                     break;
                 }
+
+                case COLON:
+                    print_mode(MODE_COMMAND);
+                    break;
 
                 default:
                     break;
