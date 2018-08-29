@@ -14,6 +14,8 @@
 #include <sys/wait.h>
 #include <cstddef>         // std::size_t
 #include <fcntl.h>
+#include <ftw.h>
+
 
 #include <iostream>
 #include <algorithm>
@@ -354,13 +356,13 @@ void refresh_dir_content()
 }
 
 
-string full_path_get(string str)
+string abs_path_get(string str)
 {
     char *str_buf = new char[str.length() + 1];
     strncpy(str_buf, str.c_str(), str.length());
     str_buf[str.length()] = '\0';
 
-    string ret_path = working_dir;
+    string ret_path = working_dir, prev_tok = working_dir;
     char *p_str = strtok(str_buf, "/");
     while(p_str)
     {
@@ -368,6 +370,7 @@ string full_path_get(string str)
         if(tok == ".")
         {
             p_str = strtok (NULL, "/");
+            prev_tok = tok;
         }
         else if(tok == "..")
         {
@@ -377,12 +380,19 @@ string full_path_get(string str)
                 size_t fwd_slash_pos = ret_path.find_last_of("/");
                 ret_path = ret_path.substr(0, fwd_slash_pos + 1);
             }
+            prev_tok = tok;
             p_str = strtok (NULL, "/");
         }
         else if (tok == "~")
         {
             ret_path = root_dir;
+            prev_tok = tok;
             p_str = strtok (NULL, "/");
+        }
+        else if(tok == "")
+        {
+            if(prev_tok != "")
+                ret_path = "/";
         }
         else
         {
@@ -397,20 +407,53 @@ string full_path_get(string str)
     return ret_path;
 }
 
-int copy_file_to_dir(string file, string dest)
+int copy_file_to_dir(string src_file_path, string dest_dir_path)
 {
-    if(dest[dest.length() - 1] != '/')
-        dest = dest + "/";
+    if(dest_dir_path[dest_dir_path.length() - 1] != '/')
+        dest_dir_path = dest_dir_path + "/";
 
-    size_t fwd_slash_pos = file.find_last_of("/");
-    dest += file.substr(fwd_slash_pos + 1);
+    struct stat src_file_stat;
+    size_t fwd_slash_pos = src_file_path.find_last_of("/");
+    string dest_file_path = dest_dir_path;
+    dest_file_path += src_file_path.substr(fwd_slash_pos + 1);
 
-    cout << " " << file << " " << dest;
+    //cout << " " << src_file_path << " " << dest_file_path;
 
-    ifstream in(file);
-    ofstream out(dest);
+    ifstream in(src_file_path);
+    ofstream out(dest_file_path);
 
     out << in.rdbuf();
+
+    stat(src_file_path.c_str(), &src_file_stat);
+    chmod(dest_file_path.c_str(), src_file_stat.st_mode);
+    chown(dest_file_path.c_str(), src_file_stat.st_uid, src_file_stat.st_gid);
+    return 0;
+}
+
+string my_dest_root;
+int src_dir_pos;
+constexpr int ftw_max_fd = 100;
+
+/*extern "C" */int copy_content(const char*, const struct stat*, int);
+
+int copy_content(const char* src_path, const struct stat* sb, int typeflag) {
+    string src_path_str(src_path);
+    string dst_path = my_dest_root + src_path_str.substr(src_dir_pos);
+    
+    switch(typeflag) {
+        case FTW_D:
+            mkdir(dst_path.c_str(), sb->st_mode);
+            break;
+        case FTW_F:
+            copy_file_to_dir(src_path_str, dst_path.substr(0, dst_path.find_last_of("/")));
+    }
+    return 0;
+}
+
+int copy_dir_to_dir(string src_dir_path, string dest_dir_path) {
+    my_dest_root = dest_dir_path;
+    src_dir_pos = src_dir_path.find_last_of("/");
+    ftw(src_dir_path.c_str(), copy_content, ftw_max_fd);
 }
 
 void enter_command_mode()
@@ -459,13 +502,13 @@ void enter_command_mode()
         if(command[0] == "copy")
         {
             string src_path, dest_path;
-            dest_path = full_path_get(command.back());
+            dest_path = abs_path_get(command.back());
             for(int i = 1; i < command.size() - 1; ++i)
             {
-                src_path = full_path_get(command[i]);
+                src_path = abs_path_get(command[i]);
                 if(is_directory(src_path))
                 {
-                    ;
+                    copy_dir_to_dir(src_path, dest_path);
                 }
                 else
                 {
