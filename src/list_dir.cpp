@@ -308,7 +308,7 @@ int print_mode()
             ss << "[NORMAL MODE]";
             break;
         case MODE_COMMAND:
-            ss << "[COMMAND MODE] $";
+            ss << "[COMMAND MODE] :";
             break;
     }
     cout << "\033[1;33;40m" << ss.str() << "\033[0m" << " ";
@@ -402,7 +402,7 @@ string abs_path_get(string str)
         else if(tok == "")
         {
             if(prev_tok != "")
-                ret_path = "/";
+                ret_path = root_dir;
         }
         else
         {
@@ -427,8 +427,6 @@ int copy_file_to_dir(string src_file_path, string dest_dir_path)
     string dest_file_path = dest_dir_path;
     dest_file_path += src_file_path.substr(fwd_slash_pos + 1);
 
-    //cout << " " << src_file_path << " " << dest_file_path;
-
     ifstream in(src_file_path);
     ofstream out(dest_file_path);
 
@@ -444,9 +442,9 @@ string my_dest_root;
 int src_dir_pos;
 constexpr int ftw_max_fd = 100;
 
-/*extern "C" */int copy_content(const char*, const struct stat*, int);
+int copy_cb(const char*, const struct stat*, int);
 
-int copy_content(const char* src_path, const struct stat* sb, int typeflag) {
+int copy_cb(const char* src_path, const struct stat* sb, int typeflag) {
     string src_path_str(src_path);
     string dst_path = my_dest_root + src_path_str.substr(src_dir_pos);
     
@@ -463,7 +461,7 @@ int copy_content(const char* src_path, const struct stat* sb, int typeflag) {
 int copy_dir_to_dir(string src_dir_path, string dest_dir_path) {
     my_dest_root = dest_dir_path;
     src_dir_pos = src_dir_path.find_last_of("/");
-    ftw(src_dir_path.c_str(), copy_content, ftw_max_fd);
+    ftw(src_dir_path.c_str(), copy_cb, ftw_max_fd);
 }
 
 void copy_command(vector<string> &cmd)
@@ -482,6 +480,7 @@ void copy_command(vector<string> &cmd)
             copy_file_to_dir(src_path, dest_path);
         }
     }
+    refresh_dir_content();
 }
 
 int delete_cb(const char *path, const struct stat *sb, int typeflag, struct FTW *ftwbuf)
@@ -498,17 +497,6 @@ int delete_cb(const char *path, const struct stat *sb, int typeflag, struct FTW 
         if(FAILURE == unlinkat(0, rem_path.c_str(), 0))
             cout << "unlinkat failed!! errno " << errno;
     }
-    #if 0
-    switch(typeflag) {
-        case FTW_D:
-            if(FAILURE == unlinkat(0, rem_path.c_str(), AT_REMOVEDIR))
-                cout << "unlinkat failed!! errno " << errno;
-            break;
-        case FTW_F:
-            if(FAILURE == unlinkat(0, rem_path.c_str(), 0))
-                cout << "unlinkat failed!! errno " << errno;
-    }
-    #endif
     return 0;
 }
 
@@ -533,28 +521,15 @@ void enter_command_mode()
 {
     current_mode = MODE_COMMAND;
     print_mode();
-    //cursor_c_pos = print_mode() + 1;
-    //cursor_init();
 
-#if 0
-    FILE *input = fopen("/dev/tty", "r");
-    if(!input) 
-    {
-        cout << "fopen() failed!!";
-        return;
-    }
-#endif
-
+    #if 0
     struct termios prev_attr, new_attr;
     tcgetattr(STDIN_FILENO, &prev_attr);
-    //tcgetattr(fileno(input), &prev_attr);
     new_attr = prev_attr;
     new_attr.c_lflag |= ICANON;
     new_attr.c_lflag |= ECHO;
-    new_attr.c_cc[VKILL] = ESC;
-    new_attr.c_cc[VEOF] = ESC;
     tcsetattr(STDIN_FILENO, TCSANOW, &new_attr);
-    //tcsetattr(fileno(input), TCSANOW, &new_attr);
+    #endif
 
     while(1)
     {
@@ -573,7 +548,11 @@ void enter_command_mode()
            command.push_back(part);
         }
 
-        screen_clear();
+        string last_part = command[command.size() - 1];
+        if(last_part[last_part.length() - 1] == ESC)
+            break;
+
+        //screen_clear();
         if(command[0] == "copy")
         {
             copy_command(command);
@@ -584,15 +563,37 @@ void enter_command_mode()
         }
         else if(command[0] == "rename")
         {
-            
+            string old_path = abs_path_get(command[1]);
+            string new_path = abs_path_get(command[2]);
+            if(FAILURE == rename(old_path.c_str(), new_path.c_str()))
+            {
+                cout << "rename failed!! errno: " << errno;
+            }
+            refresh_dir_content();
         }
         else if(command[0] == "create_file")
         {
-        
+            string dest_path = abs_path_get(command[2]);
+            if(dest_path[dest_path.length() - 1] != '/')
+                dest_path = dest_path + "/";
+
+            dest_path += command[1];
+            int fd = open(dest_path.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+            if(FAILURE == fd)
+                cout << "open failed!! errno: " << errno;
+            else
+                close(fd);
+            refresh_dir_content();
         }
         else if(command[0] == "create_dir")
         {
-            
+            string dest_path = abs_path_get(command[2]);
+            if(dest_path[dest_path.length() - 1] != '/')
+                dest_path = dest_path + "/";
+
+            dest_path += command[1];
+            mkdir(dest_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+            refresh_dir_content();
         }
         else if(command[0] == "delete_file")
         {
@@ -601,6 +602,7 @@ void enter_command_mode()
             {
                 cout << "unlinkat failed!! errno: " << errno;
             }
+            refresh_dir_content();
         }
         else if(command[0] == "delete_dir")
         {
@@ -609,7 +611,10 @@ void enter_command_mode()
         }
         else if(command[0] == "goto")
         {
-        
+            working_dir = abs_path_get(command[1]);
+            if(working_dir[working_dir.length() - 1] != '/')
+                working_dir = working_dir + "/";
+            refresh_dir_content();
         }
         else if(command[0] == "search")
         {
@@ -635,7 +640,9 @@ void enter_command_mode()
         cmd += ch;
     }
 #endif
+end:
     tcsetattr( STDIN_FILENO, TCSANOW, &prev_attr);
+    current_mode = MODE_NORMAL;
 }
 
 int enter_normal_mode()
