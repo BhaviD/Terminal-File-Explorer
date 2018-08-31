@@ -49,7 +49,7 @@ using namespace std;
 #define l_citr(T) list<T>::const_iterator
 
 static struct winsize w;
-int n, cursor_r_pos = 1, cursor_c_pos = 1;
+int n, cursor_r_pos = 1, cursor_c_pos = 1, cursor_left_limit, cursor_right_limit;
 static string root_dir;
 static string working_dir;
 struct termios prev_attr, new_attr;
@@ -81,6 +81,7 @@ int content_list_print(list<dir_content>::const_iterator itr);
 bool move_cursor_r(int r, int dr);
 void cursor_init();
 void refresh_dir_content();
+char next_input_char_get();
 
 Mode current_mode;
 
@@ -162,6 +163,14 @@ inline void screen_clear()
     cout.flush();
     cursor_r_pos = cursor_c_pos = 1;
     cursor_init();
+}
+
+inline void from_cursor_line_clear()
+{
+    cout << "\e[0K";
+    cout.flush();
+    //cursor_c_pos = 1;
+    //cursor_init();
 }
 
 string human_readable_size_get(off_t size)
@@ -318,6 +327,7 @@ int print_mode()
     {
         cursor_c_pos = ss.str().length() + 2;       // two spaces
         cursor_init();
+        cursor_left_limit = cursor_right_limit = cursor_c_pos;
     }
     return ss.str().length() + 1;
 }
@@ -522,7 +532,6 @@ void enter_command_mode()
 {
     bool command_mode_exit = false;
     current_mode = MODE_COMMAND;
-    //print_mode();
 
     #if 0
     struct termios prev_attr, new_attr;
@@ -533,35 +542,104 @@ void enter_command_mode()
     tcsetattr(STDIN_FILENO, TCSANOW, &new_attr);
     #endif
 
-    char ch;
-    while(!command_mode_exit)
+    while(1)
     {
-        ch = next_input_char_get();
-        #if 0
-        string cmd;
+        refresh_dir_content();
+
         char ch;
-        while ((ch = cin.get()) != ESC) {
-            cmd += ch;
-        }
-        #endif
-        char cmd[COMMAND_LEN + 1];
-        cin.getline(cmd, COMMAND_LEN);
-
-        if(!strcmp(cmd, ""))
-            break;
-
-        vector<string> command;
-        stringstream ss(cmd);
-        string part;
-
-        while(getline(ss, part, ' '))
+        string cmd;
+        int cmd_len = 0;
+        bool enter_pressed = false;
+        while(!enter_pressed && !command_mode_exit)
         {
-           command.push_back(part);
-        }
+            ch = next_input_char_get();
+            switch(ch)
+            {
+                case ESC:
+                    command_mode_exit = true;
+                    break;
 
-        string last_part = command[command.size() - 1];
-        if(last_part[last_part.length() - 1] == ESC)
+                case ENTER:
+                    enter_pressed = true;
+                    break;
+
+                case BACKSPACE:
+                    if(cmd.length())
+                    {
+                        --cursor_c_pos;
+                        --cursor_right_limit;
+                        cursor_init();
+                        from_cursor_line_clear();
+                        cmd.erase(cursor_c_pos - cursor_left_limit, 1);
+                        cout << cmd.substr(cursor_c_pos - cursor_left_limit);
+                        cout.flush();
+                        cursor_init();
+                    }
+                    break;
+
+                case UP:
+                case DOWN:
+                    break;
+
+                case LEFT:
+                    if(cursor_c_pos != cursor_left_limit)
+                    {
+                        --cursor_c_pos;
+                        cursor_init();
+                    }
+                    break;
+
+                case RIGHT:
+                    if(cursor_c_pos != cursor_right_limit)
+                    {
+                        ++cursor_c_pos;
+                        cursor_init();
+                    }
+                    break;
+
+                default:
+                    cmd.insert(cursor_c_pos - cursor_left_limit, 1, ch);
+                    cout << cmd.substr(cursor_c_pos - cursor_left_limit);
+                    cout.flush();
+                    ++cursor_c_pos;
+                    cursor_init();
+                    ++cursor_right_limit;
+                    break;
+            }
+        }
+        if(command_mode_exit)
             break;
+
+        if(cmd.empty())
+            continue;
+
+        string part;
+        vector<string> command;
+        
+        for(int i = 0; i < cmd.length(); ++i)
+        {
+            if(cmd[i] == ' ')
+            {
+                if(!part.empty())
+                {
+                    command.push_back(part);
+                    part = "";
+                }
+            }
+            else if(cmd[i] == '\\' && (i < cmd.length() - 1) && cmd[i+1] == ' ')
+            {
+                part += ' ';
+                ++i;
+            }
+            else
+            {
+                part += cmd[i];
+            }
+        }
+        if(!part.empty())
+            command.push_back(part);
+
+        //stringstream ss(cmd);
 
         //screen_clear();
         if(command[0] == "copy")
@@ -644,8 +722,7 @@ void enter_command_mode()
 
     }
 
-end:
-    tcsetattr( STDIN_FILENO, TCSANOW, &prev_attr);
+    //tcsetattr( STDIN_FILENO, TCSANOW, &prev_attr);
     current_mode = MODE_NORMAL;
 }
 
@@ -660,18 +737,18 @@ char next_input_char_get()
             new_attr.c_cc[VTIME] = 1;
             tcsetattr( STDIN_FILENO, TCSANOW, &new_attr);
 
-            if(FAILURE == cin.get())    // For ESC
-                break;
-
-            ch = cin.get();             // For UP, DOWN, LEFT, RIGHT
+            if(FAILURE != cin.get())    // FAILURE is return if ESC is pressed
+            {
+                ch = cin.get();         // For UP, DOWN, LEFT, RIGHT
+            }
+            new_attr.c_cc[VMIN] = 1;
+            new_attr.c_cc[VTIME] = 0;
+            tcsetattr( STDIN_FILENO, TCSANOW, &new_attr);
             break;
 
         default:
             break;
     }
-    new_attr.c_cc[VMIN] = 1;
-    new_attr.c_cc[VTIME] = 0;
-    tcsetattr( STDIN_FILENO, TCSANOW, &new_attr);
     return ch;
 }
 
