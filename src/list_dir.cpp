@@ -52,6 +52,7 @@ static struct winsize w;
 int n, cursor_r_pos = 1, cursor_c_pos = 1;
 static string root_dir;
 static string working_dir;
+struct termios prev_attr, new_attr;
 
 stack<string> bwd_stack;
 stack<string> fwd_stack;
@@ -519,8 +520,9 @@ void move_command(vector<string> &cmd)
 
 void enter_command_mode()
 {
+    bool command_mode_exit = false;
     current_mode = MODE_COMMAND;
-    print_mode();
+    //print_mode();
 
     #if 0
     struct termios prev_attr, new_attr;
@@ -531,8 +533,17 @@ void enter_command_mode()
     tcsetattr(STDIN_FILENO, TCSANOW, &new_attr);
     #endif
 
-    while(1)
+    char ch;
+    while(!command_mode_exit)
     {
+        ch = next_input_char_get();
+        #if 0
+        string cmd;
+        char ch;
+        while ((ch = cin.get()) != ESC) {
+            cmd += ch;
+        }
+        #endif
         char cmd[COMMAND_LEN + 1];
         cin.getline(cmd, COMMAND_LEN);
 
@@ -633,93 +644,102 @@ void enter_command_mode()
 
     }
 
-#if 0
-    string cmd;
-    char ch;
-    while ((ch = cin.get()) != ESC) {
-        cmd += ch;
-    }
-#endif
 end:
     tcsetattr( STDIN_FILENO, TCSANOW, &prev_attr);
     current_mode = MODE_NORMAL;
 }
 
+char next_input_char_get()
+{
+    cin.clear();
+    char ch = cin.get();
+    switch(ch)
+    {
+        case ESC:
+            new_attr.c_cc[VMIN] = 0;
+            new_attr.c_cc[VTIME] = 1;
+            tcsetattr( STDIN_FILENO, TCSANOW, &new_attr);
+
+            if(FAILURE == cin.get())    // For ESC
+                break;
+
+            ch = cin.get();             // For UP, DOWN, LEFT, RIGHT
+            break;
+
+        default:
+            break;
+    }
+    new_attr.c_cc[VMIN] = 1;
+    new_attr.c_cc[VTIME] = 0;
+    tcsetattr( STDIN_FILENO, TCSANOW, &new_attr);
+    return ch;
+}
+
 int enter_normal_mode()
 {
-    struct termios prev_attr, new_attr;
-    tcgetattr(STDIN_FILENO, &prev_attr);
-    new_attr = prev_attr;
-    new_attr.c_lflag &= ~ICANON;
-    new_attr.c_lflag &= ~ECHO;
-    tcsetattr( STDIN_FILENO, TCSANOW, &new_attr);
+    bool explorer_exit = false;
     current_mode = MODE_NORMAL;
 
     ioctl(0, TIOCGWINSZ, &w);
 
-    while(1)
+    while(!explorer_exit)
     {
         refresh_dir_content();
 
         bool refresh_dir = false;
+        char ch;
         while(!refresh_dir)
         {
-            char ch;
-            ch = cin.get();
+            ch = next_input_char_get();
             switch(ch)
             {
                 case ESC:
-                    cin.get();        // skip the [
-                    ch = cin.get();
-                    switch(ch) 
-                    { 
-                        case UP:
-                            if(move_cursor_r(cursor_r_pos, -1))
-                            {
-                                if(start_itr != content_list.begin())
-                                {
-                                    --start_itr;
-                                    content_list_print(start_itr);
-                                    cursor_r_pos = FIRST_ROW_NUM + TOP_OFFSET;
-                                    cursor_init();
-                                }
-                            }
-                            print_highlighted_line();
-                            break;
+                    screen_clear();
+                    refresh_dir = explorer_exit = true;
+                    break;
 
-                        case DOWN:
-                            if(move_cursor_r(cursor_r_pos, 1))
-                            {
-                                ++start_itr;
-                                cursor_r_pos = content_list_print(start_itr);
-                                cursor_init();
-                            }
-                            print_highlighted_line();
-                            break;
-
-                        case RIGHT:
-                            if(!fwd_stack.empty())
-                            {
-                                bwd_stack.push(working_dir);
-                                working_dir = fwd_stack.top();
-                                fwd_stack.pop();
-                            }
-                            refresh_dir = true;
-                            break;
-
-                        case LEFT:
-                            if(!bwd_stack.empty())
-                            {
-                                fwd_stack.push(working_dir);
-                                working_dir = bwd_stack.top();
-                                bwd_stack.pop();
-                            }
-                            refresh_dir = true;
-                            break;
-
-                        default:
-                            break;
+                case UP:
+                    if(move_cursor_r(cursor_r_pos, -1))
+                    {
+                        if(start_itr != content_list.begin())
+                        {
+                            --start_itr;
+                            content_list_print(start_itr);
+                            cursor_r_pos = FIRST_ROW_NUM + TOP_OFFSET;
+                            cursor_init();
+                        }
                     }
+                    print_highlighted_line();
+                    break;
+
+                case DOWN:
+                    if(move_cursor_r(cursor_r_pos, 1))
+                    {
+                        ++start_itr;
+                        cursor_r_pos = content_list_print(start_itr);
+                        cursor_init();
+                    }
+                    print_highlighted_line();
+                    break;
+
+                case RIGHT:
+                    if(!fwd_stack.empty())
+                    {
+                        bwd_stack.push(working_dir);
+                        working_dir = fwd_stack.top();
+                        fwd_stack.pop();
+                    }
+                    refresh_dir = true;
+                    break;
+
+                case LEFT:
+                    if(!bwd_stack.empty())
+                    {
+                        fwd_stack.push(working_dir);
+                        working_dir = bwd_stack.top();
+                        bwd_stack.pop();
+                    }
+                    refresh_dir = true;
                     break;
 
                 case ENTER:
@@ -795,11 +815,20 @@ int main(int argc, char* argv[])
 {
     signal (SIGWINCH, t_win_resize_handler);
 
+    tcgetattr(STDIN_FILENO, &prev_attr);
+    new_attr = prev_attr;
+    new_attr.c_lflag &= ~ICANON;
+    new_attr.c_lflag &= ~ECHO;
+    tcsetattr( STDIN_FILENO, TCSANOW, &new_attr);
+ 
     cin.get();
     root_dir = getenv("PWD");
     if(root_dir != "/")
         root_dir = root_dir + "/";
     working_dir = root_dir;
 
-    return enter_normal_mode();
+    enter_normal_mode();
+
+    tcsetattr( STDIN_FILENO, TCSANOW, &prev_attr);
+
 }
