@@ -53,7 +53,8 @@ int n, cursor_r_pos = 1, cursor_c_pos = 1, cursor_left_limit, cursor_right_limit
 static string root_dir;
 static string working_dir;
 static string search_str;
-static string search_res_dir = "Search Results Directory";
+static string snapshot_folder_path;
+static string dumpfile_path;
 struct termios prev_attr, new_attr;
 
 stack<string> bwd_stack;
@@ -74,7 +75,7 @@ struct dir_content
     dir_content(): no_lines(1) {}
 };
 
-static list<dir_content> content_list /*, search_content_list, *curr_list*/;
+static list<dir_content> content_list;
 static l_citr(dir_content) start_itr;
 static l_citr(dir_content) prev_selection_itr;
 static l_citr(dir_content) selection_itr;
@@ -172,8 +173,6 @@ inline void from_cursor_line_clear()
 {
     cout << "\e[0K";
     cout.flush();
-    //cursor_c_pos = 1;
-    //cursor_init();
 }
 
 string human_readable_size_get(off_t size)
@@ -565,7 +564,50 @@ int search_cb(const char *path, const struct stat *sb, int typeflag, struct FTW 
 
 int snapshot_cb(const char *path, const struct stat *sb, int typeflag, struct FTW *ftwbuf)
 {
-    
+    string snap_path(path);
+    if(!is_directory(snap_path))
+        return 0;
+
+    if(snap_path.find("/.") != string::npos)
+        return 0;
+
+    string line_str;
+
+    struct dirent **dir_entry_arr;
+    struct dirent *dir_entry;
+
+    ofstream dumpfile (dumpfile_path.c_str(), ios::app);
+    line_str = "." + snap_path.substr(snapshot_folder_path.length()) + ":";
+    dumpfile << line_str << endl;
+
+
+    int n = scandir(snap_path.c_str(), &dir_entry_arr, NULL, alphasort);
+    if(n == FAILURE)
+    {
+        cout << "Scandir() failed!!\n";
+        return 0;
+    }
+
+    for(int i = 0; i < n; ++i)
+    {
+        dir_entry = dir_entry_arr[i];
+
+        if(((string)dir_entry->d_name) == "." || ((string)dir_entry->d_name) == ".." ||
+           dir_entry->d_name[0] == '.')
+        {
+            continue;
+        }
+
+        dumpfile << dir_entry->d_name << endl;
+        
+        free(dir_entry_arr[i]);
+        dir_entry_arr[i] = NULL;
+    }
+    free(dir_entry_arr);
+    dir_entry_arr = NULL;
+
+    dumpfile << endl;
+
     return 0;
 }
 
@@ -573,15 +615,6 @@ void enter_command_mode()
 {
     bool command_mode_exit = false;
     current_mode = MODE_COMMAND;
-
-    #if 0
-    struct termios prev_attr, new_attr;
-    tcgetattr(STDIN_FILENO, &prev_attr);
-    new_attr = prev_attr;
-    new_attr.c_lflag |= ICANON;
-    new_attr.c_lflag |= ECHO;
-    tcsetattr(STDIN_FILENO, TCSANOW, &new_attr);
-    #endif
 
     while(1)
     {
@@ -680,9 +713,6 @@ void enter_command_mode()
         if(!part.empty())
             command.push_back(part);
 
-        //stringstream ss(cmd);
-
-        //screen_clear();
         if(command[0] == "copy")
         {
             copy_command(command);
@@ -757,10 +787,14 @@ void enter_command_mode()
         }
         else if(command[0] == "snapshot")
         {
-            string folder_path = abs_path_get(command[1]);
-            string dumpfile_path = abs_path_get(command[2]);
-            nftw(folder_path.c_str(), snapshot_cb, ftw_max_fd, 0);
-            
+            snapshot_folder_path = abs_path_get(command[1]);
+            dumpfile_path = abs_path_get(command[2]);
+            ofstream dumpfile (dumpfile_path.c_str(), ios::out | ios::trunc);
+            dumpfile.close();
+            if(snapshot_folder_path[snapshot_folder_path.length() - 1] = '/')
+                snapshot_folder_path.erase(snapshot_folder_path.length() - 1);
+
+            nftw(snapshot_folder_path.c_str(), snapshot_cb, ftw_max_fd, 0);
         }
         else
         {
