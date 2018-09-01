@@ -74,11 +74,12 @@ struct dir_content
     dir_content(): no_lines(1) {}
 };
 
-static list<dir_content> dir_content_list, search_content_list, *curr_list;
+static list<dir_content> content_list /*, search_content_list, *curr_list*/;
 static l_citr(dir_content) start_itr;
 static l_citr(dir_content) prev_selection_itr;
 static l_citr(dir_content) selection_itr;
 
+bool is_search_content;
 int content_list_print(list<dir_content>::const_iterator itr);
 bool move_cursor_r(int r, int dr);
 void cursor_init();
@@ -114,7 +115,7 @@ bool move_cursor_r(int r, int dr)
     }
     else if(dr < 0)
     {
-        if(selection_itr == (*curr_list).begin())
+        if(selection_itr == content_list.begin())
             return false;
 
         prev_selection_itr = selection_itr;
@@ -133,7 +134,7 @@ bool move_cursor_r(int r, int dr)
     else if(dr > 0)
     {
         ++selection_itr;
-        if(selection_itr == (*curr_list).end())
+        if(selection_itr == content_list.end())
         {
             --selection_itr;
             return false;
@@ -282,7 +283,7 @@ void content_list_create(string &working_dir)
         return;
     }
 
-    dir_content_list.clear();
+    content_list.clear();
     for(int i = 0; i < n; ++i)
     {
         dir_entry = dir_entry_arr[i];
@@ -296,7 +297,7 @@ void content_list_create(string &working_dir)
         dir_content dc;
         dc.name = dir_entry->d_name;
         dc.content_line = content_line_get(working_dir + dir_entry->d_name);
-        dir_content_list.pb(dc);
+        content_list.pb(dc);
         
         free(dir_entry_arr[i]);
         dir_entry_arr[i] = NULL;
@@ -353,21 +354,13 @@ int content_list_print(list<dir_content>::const_iterator itr)
     screen_clear();
 
     int nRows_printed;
-    if(curr_list == &search_content_list)
-    {
-        pwd_str = bwd_stack.top();
-    }
-    else
-    {
-        pwd_str = working_dir;
-    }
-    if(pwd_str == root_dir)
+    if(working_dir == root_dir)
         cout << "\033[1;33;40m" << "PWD: ~/" << "\033[0m";
     else
-        cout << "\033[1;33;40m" << "PWD: ~/" << pwd_str.substr(root_dir.length()) << "\033[0m";
+        cout << "\033[1;33;40m" << "PWD: ~/" << working_dir.substr(root_dir.length()) << "\033[0m";
     ++cursor_r_pos;
     cursor_init();
-    for(nRows_printed = TOP_OFFSET; nRows_printed < nWin_rows - BOTTOM_OFFSET && itr != (*curr_list).end()/*dir_content_list.end()*/; ++nRows_printed, ++itr)
+    for(nRows_printed = TOP_OFFSET; nRows_printed < nWin_rows - BOTTOM_OFFSET && itr != content_list.end(); ++nRows_printed, ++itr)
     {
         cout << itr->content_line;
         ++cursor_r_pos;
@@ -384,16 +377,12 @@ inline void stack_clear(stack<string> &s)
 
 void refresh_display()
 {
-    if(curr_list == &dir_content_list)
+    if(!is_search_content)
         content_list_create(working_dir);
 
-    //curr_list = &dir_content_list;
-
-    //start_itr = dir_content_list.begin();
-    start_itr = (*curr_list).begin();
+    start_itr = content_list.begin();
     selection_itr = start_itr;
-    //prev_selection_itr = dir_content_list.end();
-    prev_selection_itr = (*curr_list).end();
+    prev_selection_itr = content_list.end();
 
     content_list_print(start_itr);
     if(current_mode == MODE_NORMAL)
@@ -557,7 +546,7 @@ void move_command(vector<string> &cmd)
 }
 
 
-int search_cb(const char *path, const struct stat *sb, int typeflag)
+int search_cb(const char *path, const struct stat *sb, int typeflag, struct FTW *ftwbuf)
 {
     string path_str(path), cmp_str;
     size_t fwd_slash_pos = path_str.find_last_of("/");
@@ -569,11 +558,16 @@ int search_cb(const char *path, const struct stat *sb, int typeflag)
         size_t fwd_slash_pos = path_str.find_last_of("/");
         dc.name = path_str.substr(fwd_slash_pos + 1);
         dc.content_line = "~/" + path_str.substr(root_dir.length());
-        search_content_list.pb(dc);
+        content_list.pb(dc);
     }
     return 0;
 }
 
+int snapshot_cb(const char *path, const struct stat *sb, int typeflag, struct FTW *ftwbuf)
+{
+    
+    return 0;
+}
 
 void enter_command_mode()
 {
@@ -755,28 +749,25 @@ void enter_command_mode()
         else if(command[0] == "search")
         {
             search_str = command[1];
-            ftw(working_dir.c_str(), search_cb, ftw_max_fd);
-            curr_list = &search_content_list;
+            content_list.clear();
+            nftw(working_dir.c_str(), search_cb, ftw_max_fd, 0);
+            is_search_content = true;
             stack_clear(fwd_stack);
-            bwd_stack.push(working_dir);
-
-            working_dir = search_res_dir;
             break;
         }
         else if(command[0] == "snapshot")
         {
-        
+            string folder_path = abs_path_get(command[1]);
+            string dumpfile_path = abs_path_get(command[2]);
+            nftw(folder_path.c_str(), snapshot_cb, ftw_max_fd, 0);
+            
         }
         else
         {
             ;   /* NULL */
         }
-
-        //getchar();
-
     }
 
-    //tcsetattr( STDIN_FILENO, TCSANOW, &prev_attr);
     current_mode = MODE_NORMAL;
 }
 
@@ -813,7 +804,6 @@ int enter_normal_mode()
 
     ioctl(0, TIOCGWINSZ, &w);
 
-    curr_list = &dir_content_list;
     while(!explorer_exit)
     {
         refresh_display();
@@ -833,7 +823,7 @@ int enter_normal_mode()
                 case UP:
                     if(move_cursor_r(cursor_r_pos, -1))
                     {
-                        if(start_itr != dir_content_list.begin())
+                        if(start_itr != content_list.begin())
                         {
                             --start_itr;
                             content_list_print(start_itr);
@@ -859,11 +849,6 @@ int enter_normal_mode()
                     {
                         bwd_stack.push(working_dir);
                         working_dir = fwd_stack.top();
-                        if(working_dir == search_res_dir)
-                            curr_list = &search_content_list;
-                        else
-                            curr_list = &dir_content_list;
-
                         fwd_stack.pop();
                     }
                     refresh_dir = true;
@@ -876,10 +861,9 @@ int enter_normal_mode()
                         working_dir = bwd_stack.top();
                         bwd_stack.pop();
                     }
-                    if(working_dir == search_res_dir)
-                        curr_list = &search_content_list;
-                    else
-                        curr_list = &dir_content_list;
+                    if(is_search_content)
+                        is_search_content = false;
+
                     refresh_dir = true;
                     break;
 
@@ -904,11 +888,11 @@ int enter_normal_mode()
                         stack_clear(fwd_stack);
                         bwd_stack.push(working_dir);
 
-                        if(curr_list == &search_content_list)
+                        if(is_search_content)
                         {
-                            size_t fwd_slash_pos = working_dir.find_first_of("/");
-                            working_dir = root_dir + (selection_itr->content_line).substr(fwd_slash_pos + 1);
-                            curr_list = &dir_content_list;
+                            size_t fwd_slash_pos = (selection_itr->content_line).find_first_of("/");
+                            working_dir = root_dir + (selection_itr->content_line).substr(fwd_slash_pos + 1) + "/";
+                            is_search_content = false;
                         }
                         else
                         {
