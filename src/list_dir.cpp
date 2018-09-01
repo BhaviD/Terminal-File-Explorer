@@ -52,6 +52,8 @@ static struct winsize w;
 int n, cursor_r_pos = 1, cursor_c_pos = 1, cursor_left_limit, cursor_right_limit;
 static string root_dir;
 static string working_dir;
+static string search_str;
+static string search_res_dir = "Search Results Directory";
 struct termios prev_attr, new_attr;
 
 stack<string> bwd_stack;
@@ -72,7 +74,7 @@ struct dir_content
     dir_content(): no_lines(1) {}
 };
 
-static list<dir_content> content_list;
+static list<dir_content> dir_content_list, search_content_list, *curr_list;
 static l_citr(dir_content) start_itr;
 static l_citr(dir_content) prev_selection_itr;
 static l_citr(dir_content) selection_itr;
@@ -80,7 +82,7 @@ static l_citr(dir_content) selection_itr;
 int content_list_print(list<dir_content>::const_iterator itr);
 bool move_cursor_r(int r, int dr);
 void cursor_init();
-void refresh_dir_content();
+void refresh_display();
 char next_input_char_get();
 
 Mode current_mode;
@@ -94,7 +96,7 @@ void print_highlighted_line()
 void t_win_resize_handler(int sig)
 {
     ioctl(0, TIOCGWINSZ, &w);
-    refresh_dir_content();
+    refresh_display();
 }
 
 inline void cursor_init()
@@ -112,7 +114,7 @@ bool move_cursor_r(int r, int dr)
     }
     else if(dr < 0)
     {
-        if(selection_itr == content_list.begin())
+        if(selection_itr == (*curr_list).begin())
             return false;
 
         prev_selection_itr = selection_itr;
@@ -131,7 +133,7 @@ bool move_cursor_r(int r, int dr)
     else if(dr > 0)
     {
         ++selection_itr;
-        if(selection_itr == content_list.end())
+        if(selection_itr == (*curr_list).end())
         {
             --selection_itr;
             return false;
@@ -204,6 +206,65 @@ string human_readable_size_get(off_t size)
     }
 }
 
+string content_line_get(string abs_path)
+{
+    struct stat dir_entry_stat;          // to retrive the stats of the file/directory
+    struct passwd *pUser;            // to determine the file/directory owner
+    struct group *pGroup;            // to determine the file/directory group
+
+    string last_modified_time;
+
+    stat(abs_path.c_str(), &dir_entry_stat);      // retrieve information about the entry
+
+    stringstream ss;
+
+    // [file-type] [permissions] [owner] [group] [size in bytes] [time of last modification] [filename]
+    switch (dir_entry_stat.st_mode & S_IFMT) {
+        case S_IFBLK:  ss << "b"; break;
+        case S_IFCHR:  ss << "c"; break; 
+        case S_IFDIR:  ss << "d"; break; // It's a (sub)directory 
+        case S_IFIFO:  ss << "p"; break; // fifo
+        case S_IFLNK:  ss << "l"; break; // Sym link
+        case S_IFSOCK: ss << "s"; break;
+        default:       ss << "-"; break; // Filetype isn't identified
+    }
+
+    // [permissions]
+    // http://linux.die.net/man/2/chmod 
+    ss << ((dir_entry_stat.st_mode & S_IRUSR) ? "r" : "-");
+    ss << ((dir_entry_stat.st_mode & S_IWUSR) ? "w" : "-");
+    ss << ((dir_entry_stat.st_mode & S_IXUSR) ? "x" : "-");
+    ss << ((dir_entry_stat.st_mode & S_IRGRP) ? "r" : "-");
+    ss << ((dir_entry_stat.st_mode & S_IWGRP) ? "w" : "-");
+    ss << ((dir_entry_stat.st_mode & S_IXGRP) ? "x" : "-");
+    ss << ((dir_entry_stat.st_mode & S_IROTH) ? "r" : "-");
+    ss << ((dir_entry_stat.st_mode & S_IWOTH) ? "w" : "-");
+    ss << ((dir_entry_stat.st_mode & S_IXOTH) ? "x" : "-");
+
+
+    // [owner] 
+    // http://linux.die.net/man/3/getpwuid
+    pUser = getpwuid(dir_entry_stat.st_uid);
+    ss << "  " << left << setw(12) << pUser->pw_name;
+
+    // [group]
+    // http://linux.die.net/man/3/getgrgid
+    pGroup = getgrgid(dir_entry_stat.st_gid);
+    ss << "  " << setw(12) << pGroup->gr_name;
+
+    // [size in bytes] [time of last modification] [filename]
+    ss << " " << human_readable_size_get(dir_entry_stat.st_size);
+    
+    last_modified_time = ctime(&dir_entry_stat.st_mtime);
+    last_modified_time[last_modified_time.length() - 1] = '\0';
+    ss << "  " << last_modified_time;
+
+    size_t fwd_slash_pos = abs_path.find_last_of("/");
+    ss << "  " << abs_path.substr(fwd_slash_pos + 1);
+
+    return ss.str();
+}
+
 void content_list_create(string &working_dir)
 {
     struct dirent **dir_entry_arr;
@@ -221,7 +282,7 @@ void content_list_create(string &working_dir)
         return;
     }
 
-    content_list.clear();
+    dir_content_list.clear();
     for(int i = 0; i < n; ++i)
     {
         dir_entry = dir_entry_arr[i];
@@ -232,58 +293,11 @@ void content_list_create(string &working_dir)
             continue;
         }
 
-        dir_entry_path = working_dir + dir_entry->d_name;   // "working_dir/dir_entry" defines the path to the entry
-        stat(dir_entry_path.c_str(), &dir_entry_stat);      // retrieve information about the entry
-
-        stringstream ss;
-
-        // [file-type] [permissions] [owner] [group] [size in bytes] [time of last modification] [filename]
-        switch (dir_entry_stat.st_mode & S_IFMT) {
-            case S_IFBLK:  ss << "b"; break;
-            case S_IFCHR:  ss << "c"; break; 
-            case S_IFDIR:  ss << "d"; break; // It's a (sub)directory 
-            case S_IFIFO:  ss << "p"; break; // fifo
-            case S_IFLNK:  ss << "l"; break; // Sym link
-            case S_IFSOCK: ss << "s"; break;
-            default:       ss << "-"; break; // Filetype isn't identified
-        }
- 
-        // [permissions]
-        // http://linux.die.net/man/2/chmod 
-        ss << ((dir_entry_stat.st_mode & S_IRUSR) ? "r" : "-");
-        ss << ((dir_entry_stat.st_mode & S_IWUSR) ? "w" : "-");
-        ss << ((dir_entry_stat.st_mode & S_IXUSR) ? "x" : "-");
-        ss << ((dir_entry_stat.st_mode & S_IRGRP) ? "r" : "-");
-        ss << ((dir_entry_stat.st_mode & S_IWGRP) ? "w" : "-");
-        ss << ((dir_entry_stat.st_mode & S_IXGRP) ? "x" : "-");
-        ss << ((dir_entry_stat.st_mode & S_IROTH) ? "r" : "-");
-        ss << ((dir_entry_stat.st_mode & S_IWOTH) ? "w" : "-");
-        ss << ((dir_entry_stat.st_mode & S_IXOTH) ? "x" : "-");
-
-
-        // [owner] 
-        // http://linux.die.net/man/3/getpwuid
-        pUser = getpwuid(dir_entry_stat.st_uid);
-        ss << "  " << left << setw(12) << pUser->pw_name;
-
-        // [group]
-        // http://linux.die.net/man/3/getgrgid
-        pGroup = getgrgid(dir_entry_stat.st_gid);
-        ss << "  " << setw(12) << pGroup->gr_name;
-
-        // [size in bytes] [time of last modification] [filename]
-        ss << " " << human_readable_size_get(dir_entry_stat.st_size);
-        
-        last_modified_time = ctime(&dir_entry_stat.st_mtime);
-        last_modified_time[last_modified_time.length() - 1] = '\0';
-        ss << "  " << last_modified_time;
-        ss << "  " << dir_entry->d_name;
-
         dir_content dc;
         dc.name = dir_entry->d_name;
-        dc.content_line = ss.str();
-        content_list.pb(dc);
-
+        dc.content_line = content_line_get(working_dir + dir_entry->d_name);
+        dir_content_list.pb(dc);
+        
         free(dir_entry_arr[i]);
         dir_entry_arr[i] = NULL;
     }
@@ -334,17 +348,26 @@ int print_mode()
 
 int content_list_print(list<dir_content>::const_iterator itr)
 {
+    string pwd_str;
     int nWin_rows = w.ws_row;
     screen_clear();
 
     int nRows_printed;
-    if(working_dir == root_dir)
+    if(curr_list == &search_content_list)
+    {
+        pwd_str = bwd_stack.top();
+    }
+    else
+    {
+        pwd_str = working_dir;
+    }
+    if(pwd_str == root_dir)
         cout << "\033[1;33;40m" << "PWD: ~/" << "\033[0m";
     else
-        cout << "\033[1;33;40m" << "PWD: ~/" << working_dir.substr(root_dir.length()) << "\033[0m";
+        cout << "\033[1;33;40m" << "PWD: ~/" << pwd_str.substr(root_dir.length()) << "\033[0m";
     ++cursor_r_pos;
     cursor_init();
-    for(nRows_printed = TOP_OFFSET; nRows_printed < nWin_rows - BOTTOM_OFFSET && itr != content_list.end(); ++nRows_printed, ++itr)
+    for(nRows_printed = TOP_OFFSET; nRows_printed < nWin_rows - BOTTOM_OFFSET && itr != (*curr_list).end()/*dir_content_list.end()*/; ++nRows_printed, ++itr)
     {
         cout << itr->content_line;
         ++cursor_r_pos;
@@ -359,13 +382,18 @@ inline void stack_clear(stack<string> &s)
     while(!s.empty()) s.pop();
 }
 
-void refresh_dir_content()
+void refresh_display()
 {
-    content_list_create(working_dir);
+    if(curr_list == &dir_content_list)
+        content_list_create(working_dir);
 
-    start_itr = content_list.begin();
+    //curr_list = &dir_content_list;
+
+    //start_itr = dir_content_list.begin();
+    start_itr = (*curr_list).begin();
     selection_itr = start_itr;
-    prev_selection_itr = content_list.end();
+    //prev_selection_itr = dir_content_list.end();
+    prev_selection_itr = (*curr_list).end();
 
     content_list_print(start_itr);
     if(current_mode == MODE_NORMAL)
@@ -491,7 +519,7 @@ void copy_command(vector<string> &cmd)
             copy_file_to_dir(src_path, dest_path);
         }
     }
-    refresh_dir_content();
+    refresh_display();
 }
 
 int delete_cb(const char *path, const struct stat *sb, int typeflag, struct FTW *ftwbuf)
@@ -514,7 +542,7 @@ int delete_cb(const char *path, const struct stat *sb, int typeflag, struct FTW 
 void delete_command(string rem_path)
 {
     nftw(rem_path.c_str(), delete_cb, 100, FTW_DEPTH | FTW_PHYS);
-    refresh_dir_content();
+    refresh_display();
 }
 
 void move_command(vector<string> &cmd)
@@ -527,6 +555,25 @@ void move_command(vector<string> &cmd)
         delete_command(rem_path);
     }
 }
+
+
+int search_cb(const char *path, const struct stat *sb, int typeflag)
+{
+    string path_str(path), cmp_str;
+    size_t fwd_slash_pos = path_str.find_last_of("/");
+    cmp_str = path_str.substr(fwd_slash_pos + 1);
+
+    if(cmp_str == search_str)
+    {
+        dir_content dc;
+        size_t fwd_slash_pos = path_str.find_last_of("/");
+        dc.name = path_str.substr(fwd_slash_pos + 1);
+        dc.content_line = "~/" + path_str.substr(root_dir.length());
+        search_content_list.pb(dc);
+    }
+    return 0;
+}
+
 
 void enter_command_mode()
 {
@@ -544,7 +591,7 @@ void enter_command_mode()
 
     while(1)
     {
-        refresh_dir_content();
+        refresh_display();
 
         char ch;
         string cmd;
@@ -658,7 +705,7 @@ void enter_command_mode()
             {
                 cout << "rename failed!! errno: " << errno;
             }
-            refresh_dir_content();
+            refresh_display();
         }
         else if(command[0] == "create_file")
         {
@@ -672,7 +719,7 @@ void enter_command_mode()
                 cout << "open failed!! errno: " << errno;
             else
                 close(fd);
-            refresh_dir_content();
+            refresh_display();
         }
         else if(command[0] == "create_dir")
         {
@@ -682,7 +729,7 @@ void enter_command_mode()
 
             dest_path += command[1];
             mkdir(dest_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-            refresh_dir_content();
+            refresh_display();
         }
         else if(command[0] == "delete_file")
         {
@@ -691,7 +738,7 @@ void enter_command_mode()
             {
                 cout << "unlinkat failed!! errno: " << errno;
             }
-            refresh_dir_content();
+            refresh_display();
         }
         else if(command[0] == "delete_dir")
         {
@@ -703,11 +750,18 @@ void enter_command_mode()
             working_dir = abs_path_get(command[1]);
             if(working_dir[working_dir.length() - 1] != '/')
                 working_dir = working_dir + "/";
-            refresh_dir_content();
+            refresh_display();
         }
         else if(command[0] == "search")
         {
-        
+            search_str = command[1];
+            ftw(working_dir.c_str(), search_cb, ftw_max_fd);
+            curr_list = &search_content_list;
+            stack_clear(fwd_stack);
+            bwd_stack.push(working_dir);
+
+            working_dir = search_res_dir;
+            break;
         }
         else if(command[0] == "snapshot")
         {
@@ -759,9 +813,10 @@ int enter_normal_mode()
 
     ioctl(0, TIOCGWINSZ, &w);
 
+    curr_list = &dir_content_list;
     while(!explorer_exit)
     {
-        refresh_dir_content();
+        refresh_display();
 
         bool refresh_dir = false;
         char ch;
@@ -778,7 +833,7 @@ int enter_normal_mode()
                 case UP:
                     if(move_cursor_r(cursor_r_pos, -1))
                     {
-                        if(start_itr != content_list.begin())
+                        if(start_itr != dir_content_list.begin())
                         {
                             --start_itr;
                             content_list_print(start_itr);
@@ -804,6 +859,11 @@ int enter_normal_mode()
                     {
                         bwd_stack.push(working_dir);
                         working_dir = fwd_stack.top();
+                        if(working_dir == search_res_dir)
+                            curr_list = &search_content_list;
+                        else
+                            curr_list = &dir_content_list;
+
                         fwd_stack.pop();
                     }
                     refresh_dir = true;
@@ -816,6 +876,10 @@ int enter_normal_mode()
                         working_dir = bwd_stack.top();
                         bwd_stack.pop();
                     }
+                    if(working_dir == search_res_dir)
+                        curr_list = &search_content_list;
+                    else
+                        curr_list = &dir_content_list;
                     refresh_dir = true;
                     break;
 
@@ -840,7 +904,16 @@ int enter_normal_mode()
                         stack_clear(fwd_stack);
                         bwd_stack.push(working_dir);
 
-                        working_dir = working_dir + selection_itr->name + "/";
+                        if(curr_list == &search_content_list)
+                        {
+                            size_t fwd_slash_pos = working_dir.find_first_of("/");
+                            working_dir = root_dir + (selection_itr->content_line).substr(fwd_slash_pos + 1);
+                            curr_list = &dir_content_list;
+                        }
+                        else
+                        {
+                            working_dir = working_dir + selection_itr->name + "/";
+                        }
                     }
                     refresh_dir = true;
                     break;
