@@ -33,7 +33,6 @@ void enter_command_mode()
 
         char ch;
         string cmd;
-        int cmd_len = 0;
         bool enter_pressed = false;
         while(!enter_pressed && !command_mode_exit)
         {
@@ -101,7 +100,7 @@ void enter_command_mode()
         string part;
         vector<string> command;
 
-        for(int i = 0; i < cmd.length(); ++i)
+        for(unsigned int i = 0; i < cmd.length(); ++i)
         {
             if(cmd[i] == ' ')
             {
@@ -202,7 +201,7 @@ void enter_command_mode()
             dumpfile_path = abs_path_get(command[2]);
             ofstream dumpfile (dumpfile_path.c_str(), ios::out | ios::trunc);
             dumpfile.close();
-            if(snapshot_folder_path[snapshot_folder_path.length() - 1] = '/')
+            if(snapshot_folder_path[snapshot_folder_path.length() - 1] == '/')
                 snapshot_folder_path.erase(snapshot_folder_path.length() - 1);
 
             nftw(snapshot_folder_path.c_str(), snapshot_cb, ftw_max_fd, 0);
@@ -240,7 +239,7 @@ int copy_file_to_dir(string src_file_path, string dest_dir_path)
 string dest_root;
 int src_dir_pos;
 
-int copy_cb(const char* src_path, const struct stat* sb, int typeflag) {
+int copy_cb(const char* src_path, const struct stat* sb, int typeflag, struct FTW *ftwbuf) {
     string src_path_str(src_path);
     string dst_path = dest_root + src_path_str.substr(src_dir_pos);
 
@@ -257,14 +256,15 @@ int copy_cb(const char* src_path, const struct stat* sb, int typeflag) {
 int copy_dir_to_dir(string src_dir_path, string dest_dir_path) {
     dest_root = dest_dir_path;
     src_dir_pos = src_dir_path.find_last_of("/");
-    ftw(src_dir_path.c_str(), copy_cb, ftw_max_fd);
+    nftw(src_dir_path.c_str(), copy_cb, ftw_max_fd, 0);
+    return 0;
 }
 
 void copy_command(vector<string> &cmd)
 {
     string src_path, dest_path;
     dest_path = abs_path_get(cmd.back());
-    for(int i = 1; i < cmd.size() - 1; ++i)
+    for(unsigned int i = 1; i < cmd.size() - 1; ++i)
     {
         src_path = abs_path_get(cmd[i]);
         if(is_directory(src_path))
@@ -298,7 +298,7 @@ int delete_cb(const char *path, const struct stat *sb, int typeflag, struct FTW 
 
 void delete_command(string rem_path)
 {
-    nftw(rem_path.c_str(), delete_cb, 100, FTW_DEPTH | FTW_PHYS);
+    nftw(rem_path.c_str(), delete_cb, ftw_max_fd, FTW_DEPTH | FTW_PHYS);
     display_refresh();
 }
 
@@ -306,7 +306,7 @@ void move_command(vector<string> &cmd)
 {
     copy_command(cmd);
     string rem_path;
-    for(int i = 1; i < cmd.size() - 1; ++i)
+    for(unsigned int i = 1; i < cmd.size() - 1; ++i)
     {
         rem_path = abs_path_get(cmd[i]);
         delete_command(rem_path);
