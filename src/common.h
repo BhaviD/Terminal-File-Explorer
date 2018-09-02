@@ -26,7 +26,7 @@ enum Mode
 char         next_input_char_get();
 void         from_cursor_line_clear();
 bool         is_directory(std::string str);
-void         t_win_resize_handler(int sig);
+void         win_resize_handler(int sig);
 std::string  abs_path_get(std::string str);
 void         stack_clear(std::stack<std::string> &s);
 

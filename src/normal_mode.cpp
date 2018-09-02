@@ -19,19 +19,18 @@
 
 using namespace std;
 
-#define FIRST_ROW_NUM  1
 #define BOTTOM_OFFSET  1
-#define TOP_OFFSET     1
 #define ONE_K          (1024)
 #define ONE_M          (1024*1024)
 #define ONE_G          (1024*1024*1024)
-#define COMMAND_LEN    256
 #define CHILD          0
 
-#define l_itr(T) list<T>::iterator
 #define l_citr(T) list<T>::const_iterator
 
 extern struct winsize w;
+//extern bool   is_status_pending;
+//extern string status_str;
+
 int cursor_r_pos;
 int cursor_c_pos;
 int cursor_left_limit;
@@ -49,10 +48,6 @@ static l_citr(dir_content) prev_selection_itr;
 static l_citr(dir_content) selection_itr;
 int bottom_limit, top_limit;
 bool is_search_content;
-
-pair<int, int> content_list_print(list<dir_content>::const_iterator itr);
-bool move_cursor_r(int r, int dr);
-void ranked_content_line_print(list<dir_content>::const_iterator itr);
 
 Mode current_mode;
 
@@ -72,6 +67,9 @@ void cursor_init()
     cout.flush();
 }
 
+/* prints the directory contents by wrapping the line according to 
+ * window width
+ */
 void ranked_content_line_print(list<dir_content>::const_iterator itr)
 {
     int i;
@@ -86,6 +84,10 @@ void ranked_content_line_print(list<dir_content>::const_iterator itr)
     cursor_init();
 }
 
+/* moves the cursor up or down
+ * returns true if scrolling is to be done
+ * other it returns false.
+ */
 bool move_cursor_r(int r, int dr)
 {
     bool ret = false;
@@ -93,7 +95,7 @@ bool move_cursor_r(int r, int dr)
     {
         cursor_r_pos = r;
     }
-    else if(dr < 0)
+    else if(dr < 0)     // move up
     {
         if(selection_itr == content_list.begin())
             return false;
@@ -113,7 +115,7 @@ bool move_cursor_r(int r, int dr)
             ret = true;
         }
     }
-    else if(dr > 0)
+    else if(dr > 0)     // move down
     {
         ++selection_itr;
         if(selection_itr == content_list.end())
@@ -134,6 +136,9 @@ bool move_cursor_r(int r, int dr)
         }
         else
         {
+            /* decides the entries to be skipped from the top if scroll down is done
+             *  and the next entry is spanned over multiple lines
+             */
             for(int sum = 0; sum < selection_itr->no_lines; ++start_itr)
             {
                 sum += start_itr->no_lines;
@@ -144,7 +149,8 @@ bool move_cursor_r(int r, int dr)
     return ret;
 }
 
-inline void screen_clear()
+
+void screen_clear()
 {
     cout << "\033[3J" << "\033[H\033[J";
     cout.flush();
@@ -152,6 +158,7 @@ inline void screen_clear()
     cursor_init();
 }
 
+/* returns the size in human readable form i.e. K, M, G */
 string human_readable_size_get(off_t size)
 {
     if((size / ONE_K) == 0)
@@ -183,6 +190,7 @@ string human_readable_size_get(off_t size)
     }
 }
 
+/* return all the information of a file/directory as a string */
 string content_line_get(string abs_path)
 {
     struct stat dir_entry_stat;          // to retrive the stats of the file/directory
@@ -242,13 +250,11 @@ string content_line_get(string abs_path)
     return ss.str();
 }
 
-void content_list_create(string &working_dir)
+/* creates the information list of all sub-directories and files in a directory */
+void content_list_create()
 {
     struct dirent **dir_entry_arr;
     struct dirent *dir_entry;
-    struct stat dir_entry_stat;          // to retrive the stats of the file/directory
-    struct passwd *pUser;            // to determine the file/directory owner
-    struct group *pGroup;            // to determine the file/directory group
 
     string last_modified_time, dir_entry_path;
 
@@ -290,50 +296,48 @@ void content_list_create(string &working_dir)
     dir_entry_arr = NULL;
 }
 
-#if 0
-bool is_directory(string str)
-{
-    struct stat str_stat;          // to retrive the stats of the file/directory
-    struct passwd *pUser;          // to determine the file/directory owner
-    struct group *pGroup;          // to determine the file/directory group
-
-    stat(str.c_str(), &str_stat);
-
-    if((str_stat.st_mode & S_IFMT) == S_IFDIR)
-        return true;
-    else
-        return false;
-}
-#endif
-
-/* returns the number of character printed */
-int print_mode()
+/* prints the current mode in the status bar
+ * returns the number of characters printed
+ */
+void print_mode()
 {
     cursor_r_pos = w.ws_row;
+    cursor_c_pos = 1;
     cursor_init();
+    from_cursor_line_clear();
+
     stringstream ss;
     switch(current_mode)
     {
         case MODE_NORMAL:
         default:
             ss << "[NORMAL MODE]";
+            cout << "\033[1;33;40m" << ss.str() << "\033[0m" << " ";
+
+#if 0
+            if(is_status_pending)
+            {
+                cout << "\033[1;31m" << status_str << "\033[0m";
+            }
+#endif
+            cout.flush();
             break;
 
         case MODE_COMMAND:
             ss << "[COMMAND MODE] :";
+            cout << "\033[1;33;40m" << ss.str() << "\033[0m" << " ";
+            cout.flush();
             break;
     }
-    cout << "\033[1;33;40m" << ss.str() << "\033[0m" << " ";
-    cout.flush();
     if(current_mode == MODE_COMMAND)
     {
         cursor_c_pos = ss.str().length() + 2;       // two spaces
         cursor_init();
         cursor_left_limit = cursor_right_limit = cursor_c_pos;
     }
-    return ss.str().length() + 1;
 }
 
+/* prints the list of information of a directory */
 pair<int, int> content_list_print(list<dir_content>::const_iterator itr)
 {
     string pwd_str;
@@ -392,17 +396,11 @@ pair<int, int> content_list_print(list<dir_content>::const_iterator itr)
     return make_pair(nRows_printed, num_extra_entries+1);
 }
 
-#if 0
-inline void stack_clear(stack<string> &s)
-{
-    while(!s.empty()) s.pop();
-}
-#endif
-
+/* clears screen and prints the entire list again */
 void display_refresh()
 {
     if(!is_search_content)
-        content_list_create(working_dir);
+        content_list_create();
 
     start_itr = content_list.begin();
     selection_itr = start_itr;
@@ -410,7 +408,6 @@ void display_refresh()
 
     auto p = content_list_print(start_itr);
     bottom_limit = p.first;
-    //bottom_limit = content_list_print(start_itr);
     if(current_mode == MODE_NORMAL)
     {
         cursor_r_pos = top_limit;
@@ -419,429 +416,7 @@ void display_refresh()
     }
 }
 
-
-
-#if 0
-string abs_path_get(string str)
-{
-    char *str_buf = new char[str.length() + 1];
-    strncpy(str_buf, str.c_str(), str.length());
-    str_buf[str.length()] = '\0';
-
-    string ret_path = working_dir, prev_tok = working_dir;
-    char *p_str = strtok(str_buf, "/");
-    while(p_str)
-    {
-        string tok(p_str);
-        if(tok == ".")
-        {
-            p_str = strtok (NULL, "/");
-            prev_tok = tok;
-        }
-        else if(tok == "..")
-        {
-            if(ret_path != root_dir)
-            {
-                ret_path = ret_path.substr(0, ret_path.length() - 1);
-                size_t fwd_slash_pos = ret_path.find_last_of("/");
-                ret_path = ret_path.substr(0, fwd_slash_pos + 1);
-            }
-            prev_tok = tok;
-            p_str = strtok (NULL, "/");
-        }
-        else if (tok == "~")
-        {
-            ret_path = root_dir;
-            prev_tok = tok;
-            p_str = strtok (NULL, "/");
-        }
-        else if(tok == "")
-        {
-            if(prev_tok != "")
-                ret_path = root_dir;
-        }
-        else
-        {
-            p_str = strtok (NULL, "/");
-            if(!p_str)
-                ret_path += tok;
-            else
-                ret_path += tok + "/";
-        }
-    }
-
-    return ret_path;
-}
-
-int copy_file_to_dir(string src_file_path, string dest_dir_path)
-{
-    if(dest_dir_path[dest_dir_path.length() - 1] != '/')
-        dest_dir_path = dest_dir_path + "/";
-
-    struct stat src_file_stat;
-    size_t fwd_slash_pos = src_file_path.find_last_of("/");
-    string dest_file_path = dest_dir_path;
-    dest_file_path += src_file_path.substr(fwd_slash_pos + 1);
-
-    ifstream in(src_file_path);
-    ofstream out(dest_file_path);
-
-    out << in.rdbuf();
-
-    stat(src_file_path.c_str(), &src_file_stat);
-    chmod(dest_file_path.c_str(), src_file_stat.st_mode);
-    chown(dest_file_path.c_str(), src_file_stat.st_uid, src_file_stat.st_gid);
-    return 0;
-}
-
-string my_dest_root;
-int src_dir_pos;
-constexpr int ftw_max_fd = 100;
-
-int copy_cb(const char*, const struct stat*, int);
-
-int copy_cb(const char* src_path, const struct stat* sb, int typeflag) {
-    string src_path_str(src_path);
-    string dst_path = my_dest_root + src_path_str.substr(src_dir_pos);
-
-    switch(typeflag) {
-        case FTW_D:
-            mkdir(dst_path.c_str(), sb->st_mode);
-            break;
-        case FTW_F:
-            copy_file_to_dir(src_path_str, dst_path.substr(0, dst_path.find_last_of("/")));
-    }
-    return 0;
-}
-
-int copy_dir_to_dir(string src_dir_path, string dest_dir_path) {
-    my_dest_root = dest_dir_path;
-    src_dir_pos = src_dir_path.find_last_of("/");
-    ftw(src_dir_path.c_str(), copy_cb, ftw_max_fd);
-}
-
-void copy_command(vector<string> &cmd)
-{
-    string src_path, dest_path;
-    dest_path = abs_path_get(cmd.back());
-    for(int i = 1; i < cmd.size() - 1; ++i)
-    {
-        src_path = abs_path_get(cmd[i]);
-        if(is_directory(src_path))
-        {
-            copy_dir_to_dir(src_path, dest_path);
-        }
-        else
-        {
-            copy_file_to_dir(src_path, dest_path);
-        }
-    }
-    display_refresh();
-}
-
-int delete_cb(const char *path, const struct stat *sb, int typeflag, struct FTW *ftwbuf)
-{
-    string rem_path(path);
-
-    if(is_directory(rem_path))
-    {
-        if(FAILURE == unlinkat(0, rem_path.c_str(), AT_REMOVEDIR))
-            cout << "unlinkat failed!! errno " << errno;
-    }
-    else
-    {
-        if(FAILURE == unlinkat(0, rem_path.c_str(), 0))
-            cout << "unlinkat failed!! errno " << errno;
-    }
-    return 0;
-}
-
-void delete_command(string rem_path)
-{
-    nftw(rem_path.c_str(), delete_cb, 100, FTW_DEPTH | FTW_PHYS);
-    display_refresh();
-}
-
-void move_command(vector<string> &cmd)
-{
-    copy_command(cmd);
-    string rem_path;
-    for(int i = 1; i < cmd.size() - 1; ++i)
-    {
-        rem_path = abs_path_get(cmd[i]);
-        delete_command(rem_path);
-    }
-}
-
-int search_cb(const char *path, const struct stat *sb, int typeflag, struct FTW *ftwbuf)
-{
-    string path_str(path), cmp_str;
-    size_t fwd_slash_pos = path_str.find_last_of("/");
-    cmp_str = path_str.substr(fwd_slash_pos + 1);
-
-    if(cmp_str == search_str)
-    {
-        dir_content dc;
-        size_t fwd_slash_pos = path_str.find_last_of("/");
-        dc.name = path_str.substr(fwd_slash_pos + 1);
-        dc.content_line = "~/" + path_str.substr(root_dir.length());
-        if(dc.content_line.length() % w.ws_col)
-        {
-            dc.no_lines = (dc.content_line.length() / w.ws_col) + 1;
-        }
-        else
-        {
-            dc.no_lines = (dc.content_line.length() / w.ws_col);
-        }
-        content_list.pb(dc);
-    }
-    return 0;
-}
-
-int snapshot_cb(const char *path, const struct stat *sb, int typeflag, struct FTW *ftwbuf)
-{
-    string snap_path(path);
-    if(!is_directory(snap_path))
-        return 0;
-
-    if(snap_path.find("/.") != string::npos)
-        return 0;
-
-    string line_str;
-
-    struct dirent **dir_entry_arr;
-    struct dirent *dir_entry;
-
-    ofstream dumpfile (dumpfile_path.c_str(), ios::app);
-    line_str = "." + snap_path.substr(snapshot_folder_path.length()) + ":";
-    dumpfile << line_str << endl;
-
-
-    int n = scandir(snap_path.c_str(), &dir_entry_arr, NULL, alphasort);
-    if(n == FAILURE)
-    {
-        cout << "Scandir() failed!!\n";
-        return 0;
-    }
-
-    for(int i = 0; i < n; ++i)
-    {
-        dir_entry = dir_entry_arr[i];
-
-        if(((string)dir_entry->d_name) == "." || ((string)dir_entry->d_name) == ".." ||
-           dir_entry->d_name[0] == '.')
-        {
-            continue;
-        }
-
-        dumpfile << dir_entry->d_name << endl;
-
-        free(dir_entry_arr[i]);
-        dir_entry_arr[i] = NULL;
-    }
-    free(dir_entry_arr);
-    dir_entry_arr = NULL;
-
-    dumpfile << endl;
-
-    return 0;
-}
-
-void enter_command_mode()
-{
-    bool command_mode_exit = false;
-    current_mode = MODE_COMMAND;
-
-    while(1)
-    {
-        display_refresh();
-
-        char ch;
-        string cmd;
-        int cmd_len = 0;
-        bool enter_pressed = false;
-        while(!enter_pressed && !command_mode_exit)
-        {
-            ch = next_input_char_get();
-            switch(ch)
-            {
-                case ESC:
-                    command_mode_exit = true;
-                    break;
-
-                case ENTER:
-                    enter_pressed = true;
-                    break;
-
-                case BACKSPACE:
-                    if(cmd.length())
-                    {
-                        --cursor_c_pos;
-                        --cursor_right_limit;
-                        cursor_init();
-                        from_cursor_line_clear();
-                        cmd.erase(cursor_c_pos - cursor_left_limit, 1);
-                        cout << cmd.substr(cursor_c_pos - cursor_left_limit);
-                        cout.flush();
-                        cursor_init();
-                    }
-                    break;
-
-                case UP:
-                case DOWN:
-                    break;
-
-                case LEFT:
-                    if(cursor_c_pos != cursor_left_limit)
-                    {
-                        --cursor_c_pos;
-                        cursor_init();
-                    }
-                    break;
-
-                case RIGHT:
-                    if(cursor_c_pos != cursor_right_limit)
-                    {
-                        ++cursor_c_pos;
-                        cursor_init();
-                    }
-                    break;
-
-                default:
-                    cmd.insert(cursor_c_pos - cursor_left_limit, 1, ch);
-                    cout << cmd.substr(cursor_c_pos - cursor_left_limit);
-                    cout.flush();
-                    ++cursor_c_pos;
-                    cursor_init();
-                    ++cursor_right_limit;
-                    break;
-            }
-        }
-        if(command_mode_exit)
-            break;
-
-        if(cmd.empty())
-            continue;
-
-        string part;
-        vector<string> command;
-
-        for(int i = 0; i < cmd.length(); ++i)
-        {
-            if(cmd[i] == ' ')
-            {
-                if(!part.empty())
-                {
-                    command.push_back(part);
-                    part = "";
-                }
-            }
-            else if(cmd[i] == '\\' && (i < cmd.length() - 1) && cmd[i+1] == ' ')
-            {
-                part += ' ';
-                ++i;
-            }
-            else
-            {
-                part += cmd[i];
-            }
-        }
-        if(!part.empty())
-            command.push_back(part);
-
-        if(command[0] == "copy")
-        {
-            copy_command(command);
-        }
-        else if(command[0] == "move")
-        {
-            move_command(command);
-        }
-        else if(command[0] == "rename")
-        {
-            string old_path = abs_path_get(command[1]);
-            string new_path = abs_path_get(command[2]);
-            if(FAILURE == rename(old_path.c_str(), new_path.c_str()))
-            {
-                cout << "rename failed!! errno: " << errno;
-            }
-            display_refresh();
-        }
-        else if(command[0] == "create_file")
-        {
-            string dest_path = abs_path_get(command[2]);
-            if(dest_path[dest_path.length() - 1] != '/')
-                dest_path = dest_path + "/";
-
-            dest_path += command[1];
-            int fd = open(dest_path.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
-            if(FAILURE == fd)
-                cout << "open failed!! errno: " << errno;
-            else
-                close(fd);
-            display_refresh();
-        }
-        else if(command[0] == "create_dir")
-        {
-            string dest_path = abs_path_get(command[2]);
-            if(dest_path[dest_path.length() - 1] != '/')
-                dest_path = dest_path + "/";
-
-            dest_path += command[1];
-            mkdir(dest_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-            display_refresh();
-        }
-        else if(command[0] == "delete_file")
-        {
-            string rem_path = abs_path_get(command[1]);
-            if(FAILURE == unlinkat(0, rem_path.c_str(), 0))
-            {
-                cout << "unlinkat failed!! errno: " << errno;
-            }
-            display_refresh();
-        }
-        else if(command[0] == "delete_dir")
-        {
-            string rem_path = abs_path_get(command[1]);
-            delete_command(rem_path);
-        }
-        else if(command[0] == "goto")
-        {
-            working_dir = abs_path_get(command[1]);
-            if(working_dir[working_dir.length() - 1] != '/')
-                working_dir = working_dir + "/";
-            display_refresh();
-        }
-        else if(command[0] == "search")
-        {
-            search_str = command[1];
-            content_list.clear();
-            nftw(working_dir.c_str(), search_cb, ftw_max_fd, 0);
-            is_search_content = true;
-            stack_clear(fwd_stack);
-            break;
-        }
-        else if(command[0] == "snapshot")
-        {
-            snapshot_folder_path = abs_path_get(command[1]);
-            dumpfile_path = abs_path_get(command[2]);
-            ofstream dumpfile (dumpfile_path.c_str(), ios::out | ios::trunc);
-            dumpfile.close();
-            if(snapshot_folder_path[snapshot_folder_path.length() - 1] = '/')
-                snapshot_folder_path.erase(snapshot_folder_path.length() - 1);
-
-            nftw(snapshot_folder_path.c_str(), snapshot_cb, ftw_max_fd, 0);
-        }
-        else
-        {
-            ;   /* NULL */
-        }
-    }
-
-    current_mode = MODE_NORMAL;
-}
-#endif
-
+/* launches a file by forking a child process and using xdg-open */
 void launch_file(string file_path)
 {
     pid_t pid = fork();
@@ -853,8 +428,6 @@ void launch_file(string file_path)
     {
         char c_file_path[file_path.length() + 1];
         snprintf(c_file_path, sizeof(c_file_path), "%s", file_path.c_str());
-        //char * argv_arr[3] = {"/usr/bin/xdg-open", c_file_path, NULL};
-        //execv("/usr/bin/xdg-open", argv_arr);
         execl("/usr/bin/xdg-open", "xdg-open", c_file_path, NULL);
     }
 }
@@ -875,6 +448,15 @@ int enter_normal_mode()
         while(!refresh_dir)
         {
             ch = next_input_char_get();
+            #if 0
+            if(is_status_pending)
+            {
+                is_status_pending = false;
+                print_mode();
+                cursor_r_pos = top_limit;
+                cursor_init();
+            }
+            #endif
             switch(ch)
             {
                 case ESC:
@@ -897,7 +479,6 @@ int enter_normal_mode()
                     {
                         auto p = content_list_print(start_itr);
                         bottom_limit = p.first;
-                        //bottom_limit = content_list_print(start_itr);
                         cursor_r_pos = bottom_limit + 1;
                         auto itr = selection_itr;
                         for(int i = 0; i < p.second; ++i, ++itr)
@@ -1019,7 +600,12 @@ int enter_normal_mode()
 
                 case COLON:
                 {
+                    //int saved_cursor_r_pos = cursor_r_pos;
                     enter_command_mode();
+                    //print_mode();
+                    //cursor_r_pos = saved_cursor_r_pos;
+                    //cursor_c_pos = 1;
+                    //cursor_init();
                     refresh_dir = true;
                     break;
                 }
@@ -1034,7 +620,8 @@ int enter_normal_mode()
 
 int main(int argc, char* argv[])
 {
-    signal (SIGWINCH, t_win_resize_handler);
+    //cin.get();
+    signal (SIGWINCH, win_resize_handler);
 
     tcgetattr(STDIN_FILENO, &prev_attr);
     new_attr = prev_attr;
@@ -1042,7 +629,6 @@ int main(int argc, char* argv[])
     new_attr.c_lflag &= ~ECHO;
     tcsetattr( STDIN_FILENO, TCSANOW, &new_attr);
 
-    cin.get();
     root_dir = getenv("PWD");
     if(root_dir != "/")
         root_dir = root_dir + "/";

@@ -61,6 +61,9 @@ string abs_path_get(string str)
     str_buf[str.length()] = '\0';
 
     string ret_path = working_dir, prev_tok = working_dir;
+    if(str_buf[0] == '/')
+        ret_path = root_dir;
+
     char *p_str = strtok(str_buf, "/");
     while(p_str)
     {
@@ -75,7 +78,6 @@ string abs_path_get(string str)
             if(ret_path != root_dir)
             {
                 ret_path.erase(ret_path.length() - 1);
-                //ret_path = ret_path.substr(0, ret_path.length() - 1);
                 size_t fwd_slash_pos = ret_path.find_last_of("/");
                 ret_path = ret_path.substr(0, fwd_slash_pos + 1);
             }
@@ -107,7 +109,7 @@ string abs_path_get(string str)
     return ret_path;
 }
 
-void t_win_resize_handler(int sig)
+void win_resize_handler(int sig)
 {
     ioctl(0, TIOCGWINSZ, &w);
     display_refresh();

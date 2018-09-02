@@ -15,10 +15,16 @@ extern stack<string>      fwd_stack;
 extern string             working_dir;
 extern string             root_dir;
 extern bool               is_search_content;
+extern stack<string>      bwd_stack;
+extern stack<string>      fwd_stack;
 
 static string search_str;
 static string snapshot_folder_path;
 static string dumpfile_path;
+static string dest_root;
+int    src_dir_pos;
+
+bool is_status_on;
 
 constexpr int ftw_max_fd = 100;
 
@@ -29,7 +35,8 @@ void enter_command_mode()
 
     while(1)
     {
-        display_refresh();
+        if(!is_status_on)
+            print_mode();
 
         char ch;
         string cmd;
@@ -37,6 +44,13 @@ void enter_command_mode()
         while(!enter_pressed && !command_mode_exit)
         {
             ch = next_input_char_get();
+            if(is_status_on)
+            {
+                is_status_on = false;
+                cursor_c_pos = cursor_left_limit;
+                cursor_init();
+                from_cursor_line_clear();
+            }
             switch(ch)
             {
                 case ESC:
@@ -123,12 +137,25 @@ void enter_command_mode()
         if(!part.empty())
             command.pb(part);
 
+        if(command.empty())
+            continue;
+
         if(command[0] == "copy")
         {
+            if(command.size() < 3)
+            {
+                status_print("copy: (usage):- copy <source_file/dir(s)> <destination_directory>");
+                continue;
+            }
             copy_command(command);
         }
         else if(command[0] == "move")
         {
+            if(command.size() < 3)
+            {
+                status_print("move: (usage):- move <source_file/dir(s)> <destination_directory>");
+                continue;
+            }
             move_command(command);
         }
         else if(command[0] == "rename")
@@ -137,9 +164,12 @@ void enter_command_mode()
             string new_path = abs_path_get(command[2]);
             if(FAILURE == rename(old_path.c_str(), new_path.c_str()))
             {
-                cout << "rename failed!! errno: " << errno;
+                status_print("rename failed!! errno: " + to_string(errno));
             }
-            display_refresh();
+            else
+            {
+                display_refresh();
+            }
         }
         else if(command[0] == "create_file")
         {
@@ -150,10 +180,14 @@ void enter_command_mode()
             dest_path += command[1];
             int fd = open(dest_path.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
             if(FAILURE == fd)
-                cout << "open failed!! errno: " << errno;
+            {
+                status_print( "open failed!! errno: " + to_string(errno));
+            }
             else
+            {
                 close(fd);
-            display_refresh();
+                display_refresh();
+            }
         }
         else if(command[0] == "create_dir")
         {
@@ -162,17 +196,26 @@ void enter_command_mode()
                 dest_path = dest_path + "/";
 
             dest_path += command[1];
-            mkdir(dest_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-            display_refresh();
+            if(FAILURE == mkdir(dest_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH))
+            {
+                status_print("create_dir failed!! errno: " + to_string(errno));
+            }
+            else
+            {
+                display_refresh();
+            }
         }
         else if(command[0] == "delete_file")
         {
             string rem_path = abs_path_get(command[1]);
             if(FAILURE == unlinkat(0, rem_path.c_str(), 0))
             {
-                cout << "unlinkat failed!! errno: " << errno;
+                status_print("unlinkat failed!! errno: " + to_string(errno));
             }
-            display_refresh();
+            else
+            {
+               display_refresh();
+            }
         }
         else if(command[0] == "delete_dir")
         {
@@ -181,6 +224,9 @@ void enter_command_mode()
         }
         else if(command[0] == "goto")
         {
+            stack_clear(fwd_stack);
+            bwd_stack.push(working_dir);
+
             working_dir = abs_path_get(command[1]);
             if(working_dir[working_dir.length() - 1] != '/')
                 working_dir = working_dir + "/";
@@ -208,12 +254,22 @@ void enter_command_mode()
         }
         else
         {
-            ;   /* NULL */
+            status_print("Invalid Command. Please try again!!");
         }
     }
     current_mode = MODE_NORMAL;
 }
 
+void status_print(string msg)
+{
+    is_status_on = true;
+    cursor_c_pos = cursor_left_limit;
+    cursor_init();
+
+    from_cursor_line_clear();
+    cout << "\033[1;31m" << msg << "\033[0m";
+    cout.flush();
+}
 
 int copy_file_to_dir(string src_file_path, string dest_dir_path)
 {
@@ -225,6 +281,18 @@ int copy_file_to_dir(string src_file_path, string dest_dir_path)
     string dest_file_path = dest_dir_path;
     dest_file_path += src_file_path.substr(fwd_slash_pos + 1);
 
+    struct stat file_stat;
+    if(SUCCESS == stat(dest_file_path.c_str(), &file_stat))      // dest file already exists at the destination directory
+    {
+        status_print(src_file_path.substr(fwd_slash_pos + 1) + " already exists at the destination directory!!");
+        return FAILURE;
+    }
+    if(FAILURE == stat(src_file_path.c_str(), &file_stat))       // source file doesn't exist
+    {
+        status_print(src_file_path.substr(fwd_slash_pos + 1) + " doesn't exist!!");
+        return FAILURE;
+    }
+
     ifstream in(src_file_path);
     ofstream out(dest_file_path);
 
@@ -233,11 +301,8 @@ int copy_file_to_dir(string src_file_path, string dest_dir_path)
     stat(src_file_path.c_str(), &src_file_stat);
     chmod(dest_file_path.c_str(), src_file_stat.st_mode);
     chown(dest_file_path.c_str(), src_file_stat.st_uid, src_file_stat.st_gid);
-    return 0;
+    return SUCCESS;
 }
-
-string dest_root;
-int src_dir_pos;
 
 int copy_cb(const char* src_path, const struct stat* sb, int typeflag, struct FTW *ftwbuf) {
     string src_path_str(src_path);
@@ -245,38 +310,45 @@ int copy_cb(const char* src_path, const struct stat* sb, int typeflag, struct FT
 
     switch(typeflag) {
         case FTW_D:
-            mkdir(dst_path.c_str(), sb->st_mode);
+            if(FAILURE == mkdir(dst_path.c_str(), sb->st_mode))
+            {
+                status_print("operation failed, errno: " + to_string(errno));
+                return FAILURE;
+            }
             break;
         case FTW_F:
-            copy_file_to_dir(src_path_str, dst_path.substr(0, dst_path.find_last_of("/")));
+            return copy_file_to_dir(src_path_str, dst_path.substr(0, dst_path.find_last_of("/")));
     }
-    return 0;
+    return SUCCESS;
 }
 
 int copy_dir_to_dir(string src_dir_path, string dest_dir_path) {
     dest_root = dest_dir_path;
     src_dir_pos = src_dir_path.find_last_of("/");
-    nftw(src_dir_path.c_str(), copy_cb, ftw_max_fd, 0);
-    return 0;
+    return nftw(src_dir_path.c_str(), copy_cb, ftw_max_fd, 0);
 }
 
-void copy_command(vector<string> &cmd)
+int copy_command(vector<string> &cmd)
 {
     string src_path, dest_path;
     dest_path = abs_path_get(cmd.back());
+    int ret;
     for(unsigned int i = 1; i < cmd.size() - 1; ++i)
     {
         src_path = abs_path_get(cmd[i]);
         if(is_directory(src_path))
         {
-            copy_dir_to_dir(src_path, dest_path);
+            ret = copy_dir_to_dir(src_path, dest_path);
         }
         else
         {
-            copy_file_to_dir(src_path, dest_path);
+            ret = copy_file_to_dir(src_path, dest_path);
         }
     }
-    display_refresh();
+    if(SUCCESS == ret)
+        display_refresh();
+
+    return ret;
 }
 
 int delete_cb(const char *path, const struct stat *sb, int typeflag, struct FTW *ftwbuf)
@@ -298,13 +370,15 @@ int delete_cb(const char *path, const struct stat *sb, int typeflag, struct FTW 
 
 void delete_command(string rem_path)
 {
-    nftw(rem_path.c_str(), delete_cb, ftw_max_fd, FTW_DEPTH | FTW_PHYS);
-    display_refresh();
+    if(SUCCESS == nftw(rem_path.c_str(), delete_cb, ftw_max_fd, FTW_DEPTH | FTW_PHYS))
+        display_refresh();
 }
 
 void move_command(vector<string> &cmd)
 {
-    copy_command(cmd);
+    if(FAILURE == copy_command(cmd))
+        return;
+
     string rem_path;
     for(unsigned int i = 1; i < cmd.size() - 1; ++i)
     {

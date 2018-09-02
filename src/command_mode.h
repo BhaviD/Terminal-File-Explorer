@@ -5,10 +5,14 @@
 #include <string>
 #include <fcntl.h>
 
+#define ERROR 0
+#define MSG   1
+
 void enter_command_mode();
+void status_print(std::string);
 
 int  copy_cb(const char*, const struct stat*, int);
-void copy_command(std::vector<std::string>&);
+int  copy_command(std::vector<std::string>&);
 int  copy_file_to_dir(std::string, std::string);
 int  copy_dir_to_dir(std::string, std::string);
 
