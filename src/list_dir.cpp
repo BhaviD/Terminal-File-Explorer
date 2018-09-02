@@ -1013,6 +1013,7 @@ int enter_normal_mode()
                             size_t fwd_slash_pos = working_dir.find_last_of("/");
                             working_dir = working_dir.substr(0, fwd_slash_pos + 1);
                         }
+                        refresh_dir = true;
                     }
                     else
                     {
@@ -1021,7 +1022,6 @@ int enter_normal_mode()
                         if(is_search_content)
                         {
                             size_t fwd_slash_pos = (selection_itr->content_line).find_first_of("/");
-                            //working_dir = root_dir + (selection_itr->content_line).substr(fwd_slash_pos + 1) + "/";
                             selected_str = root_dir + (selection_itr->content_line).substr(fwd_slash_pos + 1);
 
                             if(is_directory(selected_str))
@@ -1030,6 +1030,7 @@ int enter_normal_mode()
                                 bwd_stack.push(working_dir);
                                 working_dir = selected_str + "/";
                                 is_search_content = false;
+                                refresh_dir = true;
                             }
                             else
                             {
@@ -1044,6 +1045,7 @@ int enter_normal_mode()
                                 stack_clear(fwd_stack);
                                 bwd_stack.push(working_dir);
                                 working_dir = selected_str + "/";
+                                refresh_dir = true;
                             }
                             else
                             {
@@ -1051,7 +1053,6 @@ int enter_normal_mode()
                             }
                         }
                     }
-                    refresh_dir = true;
                     break;
 
                 /* HOME */
