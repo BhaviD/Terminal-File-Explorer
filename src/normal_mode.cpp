@@ -1,45 +1,30 @@
-#include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
-#include <dirent.h>
+//#include <cstring>
 #include <time.h>
 #include <pwd.h>
 #include <grp.h>
 #include <termios.h>
 #include <unistd.h>
 #include <signal.h>
-#include "utility.h"
+//#include "utility.h"
 #include <sys/wait.h>
 #include <cstddef>         // std::size_t
 #include <fcntl.h>
-#include <ftw.h>
+#include "command_mode.h"
+#include "normal_mode.h"
+#include "common.h"
+#include "includes.h"
 
-
-#include <iostream>
-#include <algorithm>
-#include <string>
-#include <list>
-#include <stack>
+//#include <algorithm>
 #include <iomanip>         // setprecision
-#include <sstream>         // stringstream
-#include <fstream>
+
 using namespace std;
 
-#define FAILURE        -1
-#define SUCCESS        0
 #define FIRST_ROW_NUM  1
 #define BOTTOM_OFFSET  1
 #define TOP_OFFSET     1
-#define ENTER          10
-#define ESC            27
-#define UP             65
-#define DOWN           66
-#define RIGHT          67
-#define LEFT           68
-#define BACKSPACE      127
-#define COLON          58
 #define ONE_K          (1024)
 #define ONE_M          (1024*1024)
 #define ONE_G          (1024*1024*1024)
@@ -49,24 +34,19 @@ using namespace std;
 #define l_itr(T) list<T>::iterator
 #define l_citr(T) list<T>::const_iterator
 
-static struct winsize w;
-int n, cursor_r_pos = 1, cursor_c_pos = 1, cursor_left_limit, cursor_right_limit;
-static string root_dir;
-static string working_dir;
-static string search_str;
-static string snapshot_folder_path;
-static string dumpfile_path;
+extern struct winsize w;
+int cursor_r_pos;
+int cursor_c_pos;
+int cursor_left_limit;
+int cursor_right_limit;
+string root_dir;
+string working_dir;
 struct termios prev_attr, new_attr;
 
 stack<string> bwd_stack;
 stack<string> fwd_stack;
 
-enum Mode
-{
-    MODE_NORMAL,
-    MODE_COMMAND
-};
-
+#if 0
 struct dir_content
 {
     int no_lines;
@@ -75,8 +55,9 @@ struct dir_content
 
     dir_content(): no_lines(1) {}
 };
+#endif
 
-static list<dir_content> content_list;
+list<dir_content> content_list;
 static l_citr(dir_content) start_itr;
 static l_citr(dir_content) prev_selection_itr;
 static l_citr(dir_content) selection_itr;
@@ -85,9 +66,6 @@ bool is_search_content;
 
 int content_list_print(list<dir_content>::const_iterator itr);
 bool move_cursor_r(int r, int dr);
-void cursor_init();
-void refresh_display();
-char next_input_char_get();
 void ranked_content_line_print(list<dir_content>::const_iterator itr);
 
 Mode current_mode;
@@ -99,17 +77,18 @@ void print_highlighted_line()
     ranked_content_line_print(selection_itr);
     cout << "\033[0m";
     cursor_r_pos = saved_cursor_r_pos;
-    //cout << "\033[1;33;105m" << selection_itr->content_line << "\033[0m";
     cursor_init();
 }
 
+#if 0
 void t_win_resize_handler(int sig)
 {
     ioctl(0, TIOCGWINSZ, &w);
-    refresh_display();
+    display_refresh();
 }
+#endif
 
-inline void cursor_init()
+void cursor_init()
 {
     cout << "\033[" << cursor_r_pos << ";" << cursor_c_pos << "H";
     cout.flush();
@@ -199,12 +178,6 @@ inline void screen_clear()
     cursor_init();
 }
 
-inline void from_cursor_line_clear()
-{
-    cout << "\e[0K";
-    cout.flush();
-}
-
 string human_readable_size_get(off_t size)
 {
     if((size / ONE_K) == 0)
@@ -251,8 +224,8 @@ string content_line_get(string abs_path)
     // [file-type] [permissions] [owner] [group] [size in bytes] [time of last modification] [filename]
     switch (dir_entry_stat.st_mode & S_IFMT) {
         case S_IFBLK:  ss << "b"; break;
-        case S_IFCHR:  ss << "c"; break; 
-        case S_IFDIR:  ss << "d"; break; // It's a (sub)directory 
+        case S_IFCHR:  ss << "c"; break;
+        case S_IFDIR:  ss << "d"; break; // It's a (sub)directory
         case S_IFIFO:  ss << "p"; break; // fifo
         case S_IFLNK:  ss << "l"; break; // Sym link
         case S_IFSOCK: ss << "s"; break;
@@ -260,7 +233,7 @@ string content_line_get(string abs_path)
     }
 
     // [permissions]
-    // http://linux.die.net/man/2/chmod 
+    // http://linux.die.net/man/2/chmod
     ss << ((dir_entry_stat.st_mode & S_IRUSR) ? "r" : "-");
     ss << ((dir_entry_stat.st_mode & S_IWUSR) ? "w" : "-");
     ss << ((dir_entry_stat.st_mode & S_IXUSR) ? "x" : "-");
@@ -272,7 +245,7 @@ string content_line_get(string abs_path)
     ss << ((dir_entry_stat.st_mode & S_IXOTH) ? "x" : "-");
 
 
-    // [owner] 
+    // [owner]
     // http://linux.die.net/man/3/getpwuid
     pUser = getpwuid(dir_entry_stat.st_uid);
     ss << "  " << left << setw(12) << pUser->pw_name;
@@ -284,7 +257,7 @@ string content_line_get(string abs_path)
 
     // [size in bytes] [time of last modification] [filename]
     ss << " " << human_readable_size_get(dir_entry_stat.st_size);
-    
+
     last_modified_time = ctime(&dir_entry_stat.st_mtime);
     last_modified_time[last_modified_time.length() - 1] = '\0';
     ss << "  " << last_modified_time;
@@ -335,7 +308,7 @@ void content_list_create(string &working_dir)
             dc.no_lines = (dc.content_line.length() / w.ws_col);
         }
         content_list.pb(dc);
-        
+
         free(dir_entry_arr[i]);
         dir_entry_arr[i] = NULL;
     }
@@ -343,6 +316,7 @@ void content_list_create(string &working_dir)
     dir_entry_arr = NULL;
 }
 
+#if 0
 bool is_directory(string str)
 {
     struct stat str_stat;          // to retrive the stats of the file/directory
@@ -356,6 +330,7 @@ bool is_directory(string str)
     else
         return false;
 }
+#endif
 
 /* returns the number of character printed */
 int print_mode()
@@ -369,6 +344,7 @@ int print_mode()
         default:
             ss << "[NORMAL MODE]";
             break;
+
         case MODE_COMMAND:
             ss << "[COMMAND MODE] :";
             break;
@@ -414,13 +390,7 @@ int content_list_print(list<dir_content>::const_iterator itr)
     ++cursor_r_pos;
     cursor_init();
     top_limit = cursor_r_pos;
-    
-    #if 0
-        cout << "\033[1;33;40m" << "PWD: ~/" << "\033[0m";
-    else
-        cout << "\033[1;33;40m" << "PWD: ~/" << working_dir.substr(root_dir.length()) << "\033[0m";
-    cursor_init();
-    #endif
+
     for(nRows_printed = cursor_r_pos-1; itr != content_list.end(); ++itr)
     {
         if(itr->no_lines > nWin_rows - nRows_printed - BOTTOM_OFFSET)
@@ -441,12 +411,14 @@ int content_list_print(list<dir_content>::const_iterator itr)
     return nRows_printed;
 }
 
+#if 0
 inline void stack_clear(stack<string> &s)
 {
     while(!s.empty()) s.pop();
 }
+#endif
 
-void refresh_display()
+void display_refresh()
 {
     if(!is_search_content)
         content_list_create(working_dir);
@@ -465,6 +437,8 @@ void refresh_display()
 }
 
 
+
+#if 0
 string abs_path_get(string str)
 {
     char *str_buf = new char[str.length() + 1];
@@ -546,7 +520,7 @@ int copy_cb(const char*, const struct stat*, int);
 int copy_cb(const char* src_path, const struct stat* sb, int typeflag) {
     string src_path_str(src_path);
     string dst_path = my_dest_root + src_path_str.substr(src_dir_pos);
-    
+
     switch(typeflag) {
         case FTW_D:
             mkdir(dst_path.c_str(), sb->st_mode);
@@ -579,7 +553,7 @@ void copy_command(vector<string> &cmd)
             copy_file_to_dir(src_path, dest_path);
         }
     }
-    refresh_display();
+    display_refresh();
 }
 
 int delete_cb(const char *path, const struct stat *sb, int typeflag, struct FTW *ftwbuf)
@@ -602,7 +576,7 @@ int delete_cb(const char *path, const struct stat *sb, int typeflag, struct FTW 
 void delete_command(string rem_path)
 {
     nftw(rem_path.c_str(), delete_cb, 100, FTW_DEPTH | FTW_PHYS);
-    refresh_display();
+    display_refresh();
 }
 
 void move_command(vector<string> &cmd)
@@ -615,7 +589,6 @@ void move_command(vector<string> &cmd)
         delete_command(rem_path);
     }
 }
-
 
 int search_cb(const char *path, const struct stat *sb, int typeflag, struct FTW *ftwbuf)
 {
@@ -679,7 +652,7 @@ int snapshot_cb(const char *path, const struct stat *sb, int typeflag, struct FT
         }
 
         dumpfile << dir_entry->d_name << endl;
-        
+
         free(dir_entry_arr[i]);
         dir_entry_arr[i] = NULL;
     }
@@ -698,7 +671,7 @@ void enter_command_mode()
 
     while(1)
     {
-        refresh_display();
+        display_refresh();
 
         char ch;
         string cmd;
@@ -769,7 +742,7 @@ void enter_command_mode()
 
         string part;
         vector<string> command;
-        
+
         for(int i = 0; i < cmd.length(); ++i)
         {
             if(cmd[i] == ' ')
@@ -809,7 +782,7 @@ void enter_command_mode()
             {
                 cout << "rename failed!! errno: " << errno;
             }
-            refresh_display();
+            display_refresh();
         }
         else if(command[0] == "create_file")
         {
@@ -823,7 +796,7 @@ void enter_command_mode()
                 cout << "open failed!! errno: " << errno;
             else
                 close(fd);
-            refresh_display();
+            display_refresh();
         }
         else if(command[0] == "create_dir")
         {
@@ -833,7 +806,7 @@ void enter_command_mode()
 
             dest_path += command[1];
             mkdir(dest_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-            refresh_display();
+            display_refresh();
         }
         else if(command[0] == "delete_file")
         {
@@ -842,7 +815,7 @@ void enter_command_mode()
             {
                 cout << "unlinkat failed!! errno: " << errno;
             }
-            refresh_display();
+            display_refresh();
         }
         else if(command[0] == "delete_dir")
         {
@@ -854,7 +827,7 @@ void enter_command_mode()
             working_dir = abs_path_get(command[1]);
             if(working_dir[working_dir.length() - 1] != '/')
                 working_dir = working_dir + "/";
-            refresh_display();
+            display_refresh();
         }
         else if(command[0] == "search")
         {
@@ -884,32 +857,7 @@ void enter_command_mode()
 
     current_mode = MODE_NORMAL;
 }
-
-char next_input_char_get()
-{
-    cin.clear();
-    char ch = cin.get();
-    switch(ch)
-    {
-        case ESC:
-            new_attr.c_cc[VMIN] = 0;
-            new_attr.c_cc[VTIME] = 1;
-            tcsetattr( STDIN_FILENO, TCSANOW, &new_attr);
-
-            if(FAILURE != cin.get())    // FAILURE is return if ESC is pressed
-            {
-                ch = cin.get();         // For UP, DOWN, LEFT, RIGHT
-            }
-            new_attr.c_cc[VMIN] = 1;
-            new_attr.c_cc[VTIME] = 0;
-            tcsetattr( STDIN_FILENO, TCSANOW, &new_attr);
-            break;
-
-        default:
-            break;
-    }
-    return ch;
-}
+#endif
 
 void launch_file(string file_path)
 {
@@ -922,8 +870,9 @@ void launch_file(string file_path)
     {
         char c_file_path[file_path.length() + 1];
         snprintf(c_file_path, sizeof(c_file_path), "%s", file_path.c_str());
-        char * argv_arr[] = {"/usr/bin/xdg-open", c_file_path, NULL};
-        execv("/usr/bin/xdg-open", argv_arr);
+        //char * argv_arr[3] = {"/usr/bin/xdg-open", c_file_path, NULL};
+        //execv("/usr/bin/xdg-open", argv_arr);
+        execl("/usr/bin/xdg-open", "xdg-open", c_file_path, NULL);
     }
 }
 
@@ -936,7 +885,7 @@ int enter_normal_mode()
 
     while(!explorer_exit)
     {
-        refresh_display();
+        display_refresh();
 
         bool refresh_dir = false;
         char ch;
@@ -953,13 +902,9 @@ int enter_normal_mode()
                 case UP:
                     if(move_cursor_r(cursor_r_pos, -1))
                     {
-                        //if(start_itr != content_list.begin())
-                        //{
-                            //--start_itr;
-                            content_list_print(start_itr);
-                            cursor_r_pos = top_limit;
-                            cursor_init();
-                        //}
+                        content_list_print(start_itr);
+                        cursor_r_pos = top_limit;
+                        cursor_init();
                     }
                     print_highlighted_line();
                     break;
@@ -967,7 +912,6 @@ int enter_normal_mode()
                 case DOWN:
                     if(move_cursor_r(cursor_r_pos, 1))
                     {
-                        //++start_itr;
                         bottom_limit = content_list_print(start_itr);
                         cursor_r_pos = bottom_limit - selection_itr->no_lines + 1;
                         cursor_init();
@@ -1062,7 +1006,7 @@ int enter_normal_mode()
                     {
                         stack_clear(fwd_stack);
                         bwd_stack.push(working_dir);
-                        
+
                         working_dir = root_dir;
                     }
                     refresh_dir = true;
@@ -1107,7 +1051,7 @@ int main(int argc, char* argv[])
     new_attr.c_lflag &= ~ICANON;
     new_attr.c_lflag &= ~ECHO;
     tcsetattr( STDIN_FILENO, TCSANOW, &new_attr);
- 
+
     cin.get();
     root_dir = getenv("PWD");
     if(root_dir != "/")
