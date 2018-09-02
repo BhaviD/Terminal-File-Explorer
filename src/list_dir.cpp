@@ -44,6 +44,7 @@ using namespace std;
 #define ONE_M          (1024*1024)
 #define ONE_G          (1024*1024*1024)
 #define COMMAND_LEN    256
+#define CHILD          0
 
 #define l_itr(T) list<T>::iterator
 #define l_citr(T) list<T>::const_iterator
@@ -79,19 +80,26 @@ static list<dir_content> content_list;
 static l_citr(dir_content) start_itr;
 static l_citr(dir_content) prev_selection_itr;
 static l_citr(dir_content) selection_itr;
-
+int bottom_limit, top_limit;
 bool is_search_content;
+
 int content_list_print(list<dir_content>::const_iterator itr);
 bool move_cursor_r(int r, int dr);
 void cursor_init();
 void refresh_display();
 char next_input_char_get();
+void ranked_content_line_print(list<dir_content>::const_iterator itr);
 
 Mode current_mode;
 
 void print_highlighted_line()
 {
-    cout << "\033[1;33;105m" << selection_itr->content_line << "\033[0m";
+    int saved_cursor_r_pos = cursor_r_pos;
+    cout << "\033[1;33;105m";
+    ranked_content_line_print(selection_itr);
+    cout << "\033[0m";
+    cursor_r_pos = saved_cursor_r_pos;
+    //cout << "\033[1;33;105m" << selection_itr->content_line << "\033[0m";
     cursor_init();
 }
 
@@ -105,6 +113,20 @@ inline void cursor_init()
 {
     cout << "\033[" << cursor_r_pos << ";" << cursor_c_pos << "H";
     cout.flush();
+}
+
+void ranked_content_line_print(list<dir_content>::const_iterator itr)
+{
+    int i;
+    for(i = 0; i < itr->no_lines - 1; ++i)
+    {
+        cout << itr->content_line.substr((i*w.ws_col), (i+1)*w.ws_col);
+        ++cursor_r_pos;
+        cursor_init();
+    }
+    cout << itr->content_line.substr(i*w.ws_col);
+    ++cursor_r_pos;
+    cursor_init();
 }
 
 bool move_cursor_r(int r, int dr)
@@ -122,13 +144,16 @@ bool move_cursor_r(int r, int dr)
         prev_selection_itr = selection_itr;
         --selection_itr;
 
-        if(r + dr >= FIRST_ROW_NUM + TOP_OFFSET)
+        if(r + dr >= top_limit)
         {
-            cursor_r_pos = r + dr;
+            ranked_content_line_print(prev_selection_itr);
+            cursor_r_pos = r - selection_itr->no_lines;
+            cursor_init();
         }
         else
         {
-            cursor_r_pos = FIRST_ROW_NUM + TOP_OFFSET;
+            //cursor_r_pos = FIRST_ROW_NUM + TOP_OFFSET;
+            --start_itr;
             ret = true;
         }
     }
@@ -145,19 +170,24 @@ bool move_cursor_r(int r, int dr)
         prev_selection_itr = selection_itr;
         ++selection_itr;
 
-        if(r + dr <= w.ws_row - BOTTOM_OFFSET)
+        //if(r + dr <= w.ws_row - BOTTOM_OFFSET)
+        if(r + prev_selection_itr->no_lines <= bottom_limit)
         {
-            cursor_r_pos = r + dr;
+            ranked_content_line_print(prev_selection_itr);
+            cursor_r_pos = r + prev_selection_itr->no_lines;
+            cursor_init();
         }
         else
         {
-            cursor_r_pos = w.ws_row - BOTTOM_OFFSET;
+            for(int sum = 0; sum < selection_itr->no_lines; sum += start_itr->no_lines, ++start_itr);
+            //cursor_r_pos = w.ws_row - BOTTOM_OFFSET;
             ret = true;
         }
     }
 
-    cout << prev_selection_itr->content_line;
-    cursor_init();
+    //ranked_content_line_print(prev_selection_itr);
+    //cout << prev_selection_itr->content_line;
+    //cursor_init();
     return ret;
 }
 
@@ -296,6 +326,14 @@ void content_list_create(string &working_dir)
         dir_content dc;
         dc.name = dir_entry->d_name;
         dc.content_line = content_line_get(working_dir + dir_entry->d_name);
+        if(dc.content_line.length() % w.ws_col)
+        {
+            dc.no_lines = (dc.content_line.length() / w.ws_col) + 1;
+        }
+        else
+        {
+            dc.no_lines = (dc.content_line.length() / w.ws_col);
+        }
         content_list.pb(dc);
         
         free(dir_entry_arr[i]);
@@ -350,20 +388,54 @@ int content_list_print(list<dir_content>::const_iterator itr)
 {
     string pwd_str;
     int nWin_rows = w.ws_row;
+    int pwd_rank;
     screen_clear();
 
     int nRows_printed;
+    stringstream ss;
     if(working_dir == root_dir)
+        ss << "PWD: ~/";
+    else
+        ss << "PWD: ~/" << working_dir.substr(root_dir.length());
+
+    if(ss.str().length() % w.ws_col)
+        pwd_rank = (ss.str().length() / w.ws_col) + 1;
+    else
+        pwd_rank = (ss.str().length() / w.ws_col);
+
+    int i = 0;
+    for(; i < pwd_rank - 1; ++i)
+    {
+        cout << "\033[1;33;40m" << ss.str().substr((i*w.ws_col), (i+1)*w.ws_col) << "\033[0m";
+        ++cursor_r_pos;
+        cursor_init();
+    }
+    cout << "\033[1;33;40m" << ss.str().substr(i*w.ws_col) << "\033[0m";
+    ++cursor_r_pos;
+    cursor_init();
+    top_limit = cursor_r_pos;
+    
+    #if 0
         cout << "\033[1;33;40m" << "PWD: ~/" << "\033[0m";
     else
         cout << "\033[1;33;40m" << "PWD: ~/" << working_dir.substr(root_dir.length()) << "\033[0m";
-    ++cursor_r_pos;
     cursor_init();
-    for(nRows_printed = TOP_OFFSET; nRows_printed < nWin_rows - BOTTOM_OFFSET && itr != content_list.end(); ++nRows_printed, ++itr)
+    #endif
+    for(nRows_printed = cursor_r_pos-1; itr != content_list.end(); ++itr)
     {
-        cout << itr->content_line;
+        if(itr->no_lines > nWin_rows - nRows_printed - BOTTOM_OFFSET)
+            break;
+
+        for(i = 0; i < itr->no_lines - 1; ++i)
+        {
+            cout << itr->content_line.substr((i*w.ws_col), (i+1)*w.ws_col);
+            ++cursor_r_pos;
+            cursor_init();
+        }
+        cout << itr->content_line.substr(i*w.ws_col);
         ++cursor_r_pos;
         cursor_init();
+        nRows_printed = cursor_r_pos - 1;
     }
     print_mode();
     return nRows_printed;
@@ -383,10 +455,10 @@ void refresh_display()
     selection_itr = start_itr;
     prev_selection_itr = content_list.end();
 
-    content_list_print(start_itr);
+    bottom_limit = content_list_print(start_itr);
     if(current_mode == MODE_NORMAL)
     {
-        cursor_r_pos = TOP_OFFSET + 1;
+        cursor_r_pos = top_limit;
         cursor_init();
         print_highlighted_line();
     }
@@ -557,6 +629,14 @@ int search_cb(const char *path, const struct stat *sb, int typeflag, struct FTW 
         size_t fwd_slash_pos = path_str.find_last_of("/");
         dc.name = path_str.substr(fwd_slash_pos + 1);
         dc.content_line = "~/" + path_str.substr(root_dir.length());
+        if(dc.content_line.length() % w.ws_col)
+        {
+            dc.no_lines = (dc.content_line.length() / w.ws_col) + 1;
+        }
+        else
+        {
+            dc.no_lines = (dc.content_line.length() / w.ws_col);
+        }
         content_list.pb(dc);
     }
     return 0;
@@ -831,6 +911,22 @@ char next_input_char_get()
     return ch;
 }
 
+void launch_file(string file_path)
+{
+    pid_t pid = fork();
+    if(FAILURE == pid)
+    {
+        return;
+    }
+    else if (CHILD == pid)
+    {
+        char c_file_path[file_path.length() + 1];
+        snprintf(c_file_path, sizeof(c_file_path), "%s", file_path.c_str());
+        char * argv_arr[] = {"/usr/bin/xdg-open", c_file_path, NULL};
+        execv("/usr/bin/xdg-open", argv_arr);
+    }
+}
+
 int enter_normal_mode()
 {
     bool explorer_exit = false;
@@ -857,13 +953,13 @@ int enter_normal_mode()
                 case UP:
                     if(move_cursor_r(cursor_r_pos, -1))
                     {
-                        if(start_itr != content_list.begin())
-                        {
-                            --start_itr;
+                        //if(start_itr != content_list.begin())
+                        //{
+                            //--start_itr;
                             content_list_print(start_itr);
-                            cursor_r_pos = FIRST_ROW_NUM + TOP_OFFSET;
+                            cursor_r_pos = top_limit;
                             cursor_init();
-                        }
+                        //}
                     }
                     print_highlighted_line();
                     break;
@@ -871,8 +967,9 @@ int enter_normal_mode()
                 case DOWN:
                     if(move_cursor_r(cursor_r_pos, 1))
                     {
-                        ++start_itr;
-                        cursor_r_pos = content_list_print(start_itr);
+                        //++start_itr;
+                        bottom_limit = content_list_print(start_itr);
+                        cursor_r_pos = bottom_limit - selection_itr->no_lines + 1;
                         cursor_init();
                     }
                     print_highlighted_line();
@@ -919,18 +1016,39 @@ int enter_normal_mode()
                     }
                     else
                     {
-                        stack_clear(fwd_stack);
-                        bwd_stack.push(working_dir);
+                        string selected_str;
 
                         if(is_search_content)
                         {
                             size_t fwd_slash_pos = (selection_itr->content_line).find_first_of("/");
-                            working_dir = root_dir + (selection_itr->content_line).substr(fwd_slash_pos + 1) + "/";
-                            is_search_content = false;
+                            //working_dir = root_dir + (selection_itr->content_line).substr(fwd_slash_pos + 1) + "/";
+                            selected_str = root_dir + (selection_itr->content_line).substr(fwd_slash_pos + 1);
+
+                            if(is_directory(selected_str))
+                            {
+                                stack_clear(fwd_stack);
+                                bwd_stack.push(working_dir);
+                                working_dir = selected_str + "/";
+                                is_search_content = false;
+                            }
+                            else
+                            {
+                                launch_file(selected_str);
+                            }
                         }
                         else
                         {
-                            working_dir = working_dir + selection_itr->name + "/";
+                            selected_str = working_dir + selection_itr->name;
+                            if(is_directory(selected_str))
+                            {
+                                stack_clear(fwd_stack);
+                                bwd_stack.push(working_dir);
+                                working_dir = selected_str + "/";
+                            }
+                            else
+                            {
+                                launch_file(selected_str);
+                            }
                         }
                     }
                     refresh_dir = true;
