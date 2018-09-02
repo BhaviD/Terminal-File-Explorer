@@ -1,14 +1,12 @@
 #include <sys/ioctl.h>
 #include <cstdio>
 #include <cstdlib>
-//#include <cstring>
 #include <time.h>
 #include <pwd.h>
 #include <grp.h>
 #include <termios.h>
 #include <unistd.h>
 #include <signal.h>
-//#include "utility.h"
 #include <sys/wait.h>
 #include <cstddef>         // std::size_t
 #include <fcntl.h>
@@ -17,7 +15,6 @@
 #include "common.h"
 #include "includes.h"
 
-//#include <algorithm>
 #include <iomanip>         // setprecision
 
 using namespace std;
@@ -46,17 +43,6 @@ struct termios prev_attr, new_attr;
 stack<string> bwd_stack;
 stack<string> fwd_stack;
 
-#if 0
-struct dir_content
-{
-    int no_lines;
-    string name;
-    string content_line;
-
-    dir_content(): no_lines(1) {}
-};
-#endif
-
 list<dir_content> content_list;
 static l_citr(dir_content) start_itr;
 static l_citr(dir_content) prev_selection_itr;
@@ -64,7 +50,7 @@ static l_citr(dir_content) selection_itr;
 int bottom_limit, top_limit;
 bool is_search_content;
 
-int content_list_print(list<dir_content>::const_iterator itr);
+pair<int, int> content_list_print(list<dir_content>::const_iterator itr);
 bool move_cursor_r(int r, int dr);
 void ranked_content_line_print(list<dir_content>::const_iterator itr);
 
@@ -79,14 +65,6 @@ void print_highlighted_line()
     cursor_r_pos = saved_cursor_r_pos;
     cursor_init();
 }
-
-#if 0
-void t_win_resize_handler(int sig)
-{
-    ioctl(0, TIOCGWINSZ, &w);
-    display_refresh();
-}
-#endif
 
 void cursor_init()
 {
@@ -131,7 +109,6 @@ bool move_cursor_r(int r, int dr)
         }
         else
         {
-            //cursor_r_pos = FIRST_ROW_NUM + TOP_OFFSET;
             --start_itr;
             ret = true;
         }
@@ -149,7 +126,6 @@ bool move_cursor_r(int r, int dr)
         prev_selection_itr = selection_itr;
         ++selection_itr;
 
-        //if(r + dr <= w.ws_row - BOTTOM_OFFSET)
         if(r + prev_selection_itr->no_lines <= bottom_limit)
         {
             ranked_content_line_print(prev_selection_itr);
@@ -158,15 +134,13 @@ bool move_cursor_r(int r, int dr)
         }
         else
         {
-            for(int sum = 0; sum < selection_itr->no_lines; sum += start_itr->no_lines, ++start_itr);
-            //cursor_r_pos = w.ws_row - BOTTOM_OFFSET;
+            for(int sum = 0; sum < selection_itr->no_lines; ++start_itr)
+            {
+                sum += start_itr->no_lines;
+            }
             ret = true;
         }
     }
-
-    //ranked_content_line_print(prev_selection_itr);
-    //cout << prev_selection_itr->content_line;
-    //cursor_init();
     return ret;
 }
 
@@ -360,11 +334,12 @@ int print_mode()
     return ss.str().length() + 1;
 }
 
-int content_list_print(list<dir_content>::const_iterator itr)
+pair<int, int> content_list_print(list<dir_content>::const_iterator itr)
 {
     string pwd_str;
     int nWin_rows = w.ws_row;
-    int pwd_rank;
+    int pwd_rank, num_extra_entries = 0;
+    bool selected_line_printed = false;
     screen_clear();
 
     int nRows_printed;
@@ -396,6 +371,12 @@ int content_list_print(list<dir_content>::const_iterator itr)
         if(itr->no_lines > nWin_rows - nRows_printed - BOTTOM_OFFSET)
             break;
 
+        if(selected_line_printed)
+            ++num_extra_entries;
+
+        if(itr == selection_itr)
+            selected_line_printed = true;
+
         for(i = 0; i < itr->no_lines - 1; ++i)
         {
             cout << itr->content_line.substr((i*w.ws_col), (i+1)*w.ws_col);
@@ -408,7 +389,7 @@ int content_list_print(list<dir_content>::const_iterator itr)
         nRows_printed = cursor_r_pos - 1;
     }
     print_mode();
-    return nRows_printed;
+    return make_pair(nRows_printed, num_extra_entries+1);
 }
 
 #if 0
@@ -427,7 +408,9 @@ void display_refresh()
     selection_itr = start_itr;
     prev_selection_itr = content_list.end();
 
-    bottom_limit = content_list_print(start_itr);
+    auto p = content_list_print(start_itr);
+    bottom_limit = p.first;
+    //bottom_limit = content_list_print(start_itr);
     if(current_mode == MODE_NORMAL)
     {
         cursor_r_pos = top_limit;
@@ -912,8 +895,15 @@ int enter_normal_mode()
                 case DOWN:
                     if(move_cursor_r(cursor_r_pos, 1))
                     {
-                        bottom_limit = content_list_print(start_itr);
-                        cursor_r_pos = bottom_limit - selection_itr->no_lines + 1;
+                        auto p = content_list_print(start_itr);
+                        bottom_limit = p.first;
+                        //bottom_limit = content_list_print(start_itr);
+                        cursor_r_pos = bottom_limit + 1;
+                        auto itr = selection_itr;
+                        for(int i = 0; i < p.second; ++i, ++itr)
+                        {
+                            cursor_r_pos -= itr->no_lines;
+                        }
                         cursor_init();
                     }
                     print_highlighted_line();
