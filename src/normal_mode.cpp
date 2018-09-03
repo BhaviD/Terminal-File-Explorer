@@ -28,8 +28,6 @@ using namespace std;
 #define l_citr(T) list<T>::const_iterator
 
 extern struct winsize w;
-//extern bool   is_status_pending;
-//extern string status_str;
 
 int cursor_r_pos;
 int cursor_c_pos;
@@ -460,9 +458,31 @@ int enter_normal_mode()
             switch(ch)
             {
                 case ESC:
-                    screen_clear();
-                    refresh_dir = explorer_exit = true;
+                {
+                    bool done = false;
+                    while(!done)
+                    {
+                        screen_clear();
+                        cout << "\033[1;31m" << "Exit File Explorer? [y/n]: " << "\033[0m";
+                        ch = next_input_char_get();
+                        switch(ch)
+                        {
+                            case 'y':
+                            case 'Y':
+                                done = refresh_dir = explorer_exit = true;
+                                break;
+
+                            case 'n':
+                            case 'N':
+                                done = refresh_dir = true;
+                                break;
+
+                            default:
+                                break;
+                        }
+                    }
                     break;
+                }
 
                 case UP:
                     if(move_cursor_r(cursor_r_pos, -1))
@@ -600,12 +620,7 @@ int enter_normal_mode()
 
                 case COLON:
                 {
-                    //int saved_cursor_r_pos = cursor_r_pos;
                     enter_command_mode();
-                    //print_mode();
-                    //cursor_r_pos = saved_cursor_r_pos;
-                    //cursor_c_pos = 1;
-                    //cursor_init();
                     refresh_dir = true;
                     break;
                 }
@@ -615,6 +630,7 @@ int enter_normal_mode()
             }
         }
     }
+    screen_clear();
     return SUCCESS;
 }
 
