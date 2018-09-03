@@ -427,6 +427,7 @@ void launch_file(string file_path)
         char c_file_path[file_path.length() + 1];
         snprintf(c_file_path, sizeof(c_file_path), "%s", file_path.c_str());
         execl("/usr/bin/xdg-open", "xdg-open", c_file_path, NULL);
+        exit(1);
     }
 }
 

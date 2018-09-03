@@ -142,26 +142,52 @@ void enter_command_mode()
 
         if(command[0] == "copy")
         {
-            if(FAILURE == command_size_check(command, 3, INT_MAX, "copy: (usage):- copy <source_file/dir(s)>"
-                                                                  " <destination_directory>"))
+            if(FAILURE == command_size_check(command, 3, INT_MAX, "copy: (usage):- \"copy <source_file/dir(s)>"
+                                                                  " <destination_directory>\""))
                 continue;
             copy_command(command);
         }
         else if(command[0] == "move")
         {
-            if(FAILURE == command_size_check(command, 3, INT_MAX, "move: (usage):- move <source_file/dir(s)>"
-                                                                  " <destination_directory>"))
+            if(FAILURE == command_size_check(command, 3, INT_MAX, "move: (usage):- \"move <source_file/dir(s)>"
+                                                                  " <destination_directory>\""))
                 continue;
             move_command(command);
         }
         else if(command[0] == "rename")
         {
-            if(FAILURE == command_size_check(command, 3, 3, "rename: (usage):- rename <source_file/dir>"
-                                                             " <destination_file/dir>"))
+            if(FAILURE == command_size_check(command, 3, 3, "rename: (usage):- \"rename <source_file/dir>"
+                                                             " <destination_file/dir>\""))
                 continue;
             
             string old_path = abs_path_get(command[1]);
             string new_path = abs_path_get(command[2]);
+            if(is_directory(old_path))
+            {
+                if(!dir_exists(old_path))
+                {
+                    status_print(command[1] + " doesn't exist!!");
+                    continue;
+                }
+                if(dir_exists(new_path))
+                {
+                    status_print(command[2] + " already exists!!");
+                    continue;
+                }
+            }
+            else
+            {
+                if(!file_exists(old_path))
+                {
+                    status_print(command[1] + " doesn't exist!!");
+                    continue;
+                }
+                if(file_exists(new_path))
+                {
+                    status_print(command[2] + " already exists!!");
+                    continue;
+                }
+            }
             if(FAILURE == rename(old_path.c_str(), new_path.c_str()))
             {
                 status_print("rename failed!! errno: " + to_string(errno));
@@ -173,8 +199,8 @@ void enter_command_mode()
         }
         else if(command[0] == "create_file")
         {
-            if(FAILURE == command_size_check(command, 3, 3, "create_file: (usage):- create_file <new_file>"
-                                                             " <destination_dir>"))
+            if(FAILURE == command_size_check(command, 3, 3, "create_file: (usage):- \"create_file <new_file>"
+                                                             " <destination_dir>\""))
                 continue;
 
             string dest_path = abs_path_get(command[2]);
@@ -187,6 +213,12 @@ void enter_command_mode()
                 continue;
             }
             dest_path += command[1];
+            if(file_exists(dest_path))
+            {
+                status_print(command[1] + " already exists at " + command[2]);
+                continue;
+            }
+
             int fd = open(dest_path.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
             if(FAILURE == fd)
             {
@@ -200,8 +232,8 @@ void enter_command_mode()
         }
         else if(command[0] == "create_dir")
         {
-            if(FAILURE == command_size_check(command, 3, 3, "create_dir: (usage):- create_dir <new_dir>"
-                                                             " <destination_dir>"))
+            if(FAILURE == command_size_check(command, 3, 3, "create_dir: (usage):- \"create_dir <new_dir>"
+                                                             " <destination_dir>\""))
                 continue;
 
             string dest_path = abs_path_get(command[2]);
@@ -214,9 +246,14 @@ void enter_command_mode()
                 continue;
             }
             dest_path += command[1];
+            if(dir_exists(dest_path))
+            {
+                status_print(command[1] + " already exists at " + command[2]);
+                continue;
+            }
             if(FAILURE == mkdir(dest_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH))
             {
-                status_print("create_dir failed!! errno: " + to_string(errno));
+                status_print("mkdir failed!! errno: " + to_string(errno));
             }
             else
             {
@@ -225,7 +262,7 @@ void enter_command_mode()
         }
         else if(command[0] == "delete_file")
         {
-            if(FAILURE == command_size_check(command, 2, 2, "delete_file: (usage):- delete_file <file>"))
+            if(FAILURE == command_size_check(command, 2, 2, "delete_file: (usage):- \"delete_file <file_path>\""))
                 continue;
 
             string rem_path = abs_path_get(command[1]);
@@ -246,6 +283,9 @@ void enter_command_mode()
         }
         else if(command[0] == "delete_dir")
         {
+            if(FAILURE == command_size_check(command, 2, 2, "delete_dir: (usage):- \"delete_dir <directory_path>\""))
+                continue;
+
             string rem_path = abs_path_get(command[1]);
             if(!dir_exists(rem_path))
             {
@@ -256,6 +296,9 @@ void enter_command_mode()
         }
         else if(command[0] == "goto")
         {
+            if(FAILURE == command_size_check(command, 2, 2, "goto: (usage):- \"goto <directory_path>\""))
+                continue;
+
             string dest_path = abs_path_get(command[1]);
             if(!dir_exists(dest_path))
             {
@@ -278,6 +321,9 @@ void enter_command_mode()
         }
         else if(command[0] == "search")
         {
+            if(FAILURE == command_size_check(command, 2, 2, "search: (usage):- \"search <directory/file_path>\""))
+                continue;
+
             search_str = command[1];
             content_list.clear();
             nftw(working_dir.c_str(), search_cb, ftw_max_fd, 0);
@@ -287,6 +333,9 @@ void enter_command_mode()
         }
         else if(command[0] == "snapshot")
         {
+            if(FAILURE == command_size_check(command, 3, 3, "snapshot: (usage):- \"snapshot <folder> <dumpfile>\""))
+                continue;
+
             snapshot_folder_path = abs_path_get(command[1]);
             if(!dir_exists(snapshot_folder_path))
             {
@@ -300,6 +349,7 @@ void enter_command_mode()
                 snapshot_folder_path.erase(snapshot_folder_path.length() - 1);
 
             nftw(snapshot_folder_path.c_str(), snapshot_cb, ftw_max_fd, 0);
+            display_refresh();
         }
         else
         {
@@ -372,15 +422,14 @@ int copy_file_to_dir(string src_file_path, string dest_dir_path)
     string dest_file_path = dest_dir_path;
     dest_file_path += src_file_path.substr(fwd_slash_pos + 1);
 
-    struct stat file_stat;
-    if(SUCCESS == stat(dest_file_path.c_str(), &file_stat))      // dest file already exists at the destination directory
+    if(file_exists(dest_file_path))
     {
-        status_print(src_file_path.substr(fwd_slash_pos + 1) + " already exists at the destination directory!!");
+        status_print("Destination file already exists at the destination directory!!");
         return FAILURE;
     }
-    if(FAILURE == stat(src_file_path.c_str(), &file_stat))       // source file doesn't exist
+    if(!file_exists(src_file_path))
     {
-        status_print(src_file_path.substr(fwd_slash_pos + 1) + " doesn't exist!!");
+        status_print("Source file doesn't exist!!");
         return FAILURE;
     }
 
@@ -395,12 +444,17 @@ int copy_file_to_dir(string src_file_path, string dest_dir_path)
     return SUCCESS;
 }
 
-int copy_cb(const char* src_path, const struct stat* sb, int typeflag, struct FTW *ftwbuf) {
+int copy_cb(const char* src_path, const struct stat* sb, int typeflag) {
     string src_path_str(src_path);
     string dst_path = dest_root + src_path_str.substr(src_dir_pos);
 
     switch(typeflag) {
         case FTW_D:
+            if(dir_exists(dst_path))
+            {
+                status_print("Destination directory already exists!!");
+                return FAILURE;
+            }
             if(FAILURE == mkdir(dst_path.c_str(), sb->st_mode))
             {
                 status_print("operation failed, errno: " + to_string(errno));
@@ -416,7 +470,7 @@ int copy_cb(const char* src_path, const struct stat* sb, int typeflag, struct FT
 int copy_dir_to_dir(string src_dir_path, string dest_dir_path) {
     dest_root = dest_dir_path;
     src_dir_pos = src_dir_path.find_last_of("/");
-    return nftw(src_dir_path.c_str(), copy_cb, ftw_max_fd, 0);
+    return ftw(src_dir_path.c_str(), copy_cb, ftw_max_fd);
 }
 
 int copy_command(vector<string> &cmd)

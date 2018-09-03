@@ -17,3 +17,6 @@
 
 6. Try to reach above the root directory will result in going to the root directory.
   E.g. Doing "goto ~/../../../" will result in going to the root directory.
+
+7. If error messages are displayed on the terminal on opening a file in normal mode,
+    please press left arrow key followed by right arrow key to come back to the same directory.
