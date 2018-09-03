@@ -9,6 +9,9 @@
 #define MSG   1
 
 void enter_command_mode();
+int  command_size_check(std::vector<std::string> &v, unsigned int, unsigned int, std::string);
+bool file_exists(std::string);
+bool dir_exists(std::string);
 void status_print(std::string);
 
 int  copy_cb(const char*, const struct stat*, int);

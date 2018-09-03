@@ -18,5 +18,9 @@
 #include <string.h>
 #include <iostream>
 #include <ftw.h>
+#include <limits>
+#include <cstdint>
+
+#define INT_MAX (std::numeric_limits<std::int32_t>::max())
 
 #endif

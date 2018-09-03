@@ -24,7 +24,7 @@ static string dumpfile_path;
 static string dest_root;
 int    src_dir_pos;
 
-bool is_status_on;
+static bool is_status_on;
 
 constexpr int ftw_max_fd = 100;
 
@@ -142,24 +142,24 @@ void enter_command_mode()
 
         if(command[0] == "copy")
         {
-            if(command.size() < 3)
-            {
-                status_print("copy: (usage):- copy <source_file/dir(s)> <destination_directory>");
+            if(FAILURE == command_size_check(command, 3, INT_MAX, "copy: (usage):- copy <source_file/dir(s)>"
+                                                                  " <destination_directory>"))
                 continue;
-            }
             copy_command(command);
         }
         else if(command[0] == "move")
         {
-            if(command.size() < 3)
-            {
-                status_print("move: (usage):- move <source_file/dir(s)> <destination_directory>");
+            if(FAILURE == command_size_check(command, 3, INT_MAX, "move: (usage):- move <source_file/dir(s)>"
+                                                                  " <destination_directory>"))
                 continue;
-            }
             move_command(command);
         }
         else if(command[0] == "rename")
         {
+            if(FAILURE == command_size_check(command, 3, 3, "rename: (usage):- rename <source_file/dir>"
+                                                             " <destination_file/dir>"))
+                continue;
+            
             string old_path = abs_path_get(command[1]);
             string new_path = abs_path_get(command[2]);
             if(FAILURE == rename(old_path.c_str(), new_path.c_str()))
@@ -173,10 +173,19 @@ void enter_command_mode()
         }
         else if(command[0] == "create_file")
         {
+            if(FAILURE == command_size_check(command, 3, 3, "create_file: (usage):- create_file <new_file>"
+                                                             " <destination_dir>"))
+                continue;
+
             string dest_path = abs_path_get(command[2]);
             if(dest_path[dest_path.length() - 1] != '/')
                 dest_path = dest_path + "/";
 
+            if(!dir_exists(dest_path))
+            {
+                status_print(command[2] + " doesn't exists!!");
+                continue;
+            }
             dest_path += command[1];
             int fd = open(dest_path.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
             if(FAILURE == fd)
@@ -191,10 +200,19 @@ void enter_command_mode()
         }
         else if(command[0] == "create_dir")
         {
+            if(FAILURE == command_size_check(command, 3, 3, "create_dir: (usage):- create_dir <new_dir>"
+                                                             " <destination_dir>"))
+                continue;
+
             string dest_path = abs_path_get(command[2]);
             if(dest_path[dest_path.length() - 1] != '/')
                 dest_path = dest_path + "/";
 
+            if(!dir_exists(dest_path))
+            {
+                status_print(command[2] + " doesn't exists!!");
+                continue;
+            }
             dest_path += command[1];
             if(FAILURE == mkdir(dest_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH))
             {
@@ -207,7 +225,16 @@ void enter_command_mode()
         }
         else if(command[0] == "delete_file")
         {
+            if(FAILURE == command_size_check(command, 2, 2, "delete_file: (usage):- delete_file <file>"))
+                continue;
+
             string rem_path = abs_path_get(command[1]);
+            if(!file_exists(rem_path))
+            {
+                status_print(command[1] + " doesn't exists!!");
+                continue;
+            }
+            
             if(FAILURE == unlinkat(0, rem_path.c_str(), 0))
             {
                 status_print("unlinkat failed!! errno: " + to_string(errno));
@@ -220,14 +247,25 @@ void enter_command_mode()
         else if(command[0] == "delete_dir")
         {
             string rem_path = abs_path_get(command[1]);
+            if(!dir_exists(rem_path))
+            {
+                status_print(command[1] + " doesn't exist!!");
+                continue;
+            }
             delete_command(rem_path);
         }
         else if(command[0] == "goto")
         {
+            string dest_path = abs_path_get(command[1]);
+            if(!dir_exists(dest_path))
+            {
+                status_print(command[1] + " doesn't exist!!");
+                continue;
+            }
             stack_clear(fwd_stack);
             bwd_stack.push(working_dir);
 
-            working_dir = abs_path_get(command[1]);
+            working_dir = dest_path;
             if(working_dir[working_dir.length() - 1] != '/')
                 working_dir = working_dir + "/";
             display_refresh();
@@ -244,6 +282,11 @@ void enter_command_mode()
         else if(command[0] == "snapshot")
         {
             snapshot_folder_path = abs_path_get(command[1]);
+            if(!dir_exists(snapshot_folder_path))
+            {
+                status_print(command[1] + " doesn't exist!!");
+                continue;
+            }
             dumpfile_path = abs_path_get(command[2]);
             ofstream dumpfile (dumpfile_path.c_str(), ios::out | ios::trunc);
             dumpfile.close();
@@ -260,8 +303,50 @@ void enter_command_mode()
     current_mode = MODE_NORMAL;
 }
 
+int command_size_check(vector<string> &v, unsigned int min_size, unsigned int max_size, string error_msg)
+{
+    if(v.size() < min_size || v.size() > max_size)
+    {
+        status_print(error_msg);
+        return FAILURE;
+    }
+    return SUCCESS;
+}
+
+bool file_exists(string file_path)
+{
+    if(FAILURE == access(file_path.c_str(), F_OK))
+        return false;
+    else
+        return true;
+}
+
+bool dir_exists(string dir_path)
+{
+    DIR* dir = opendir(dir_path.c_str());
+    if (dir)
+    {
+        /* Directory exists. */
+        closedir(dir);
+        return true;
+    }
+    else if (ENOENT == errno)
+    {
+        /* Directory does not exist. */
+        return false;
+    }
+    else
+    {
+        status_print("opendir() failed!! errno: " + to_string(errno));
+        return false;
+    }
+}
+
 void status_print(string msg)
 {
+    if(is_status_on)
+        return;
+
     is_status_on = true;
     cursor_c_pos = cursor_left_limit;
     cursor_init();
