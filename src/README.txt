@@ -1,0 +1,16 @@
+1. Please set the text and background colors of terminal to "system colors" before running the application.
+    Edit -> Profile Preferences -> Colors -> tick on "Use colors from system them"
+
+   This would turn the background to white and text to black, which is most suitable for the colors
+   used in the application.
+
+2. Spaces can occur in file/directory names. THe user should use '\' character before the space to
+   include it in the name.
+   E.g.: my\ file\ name.txt   --> is a single file with spaces in its name.
+
+3. Left-Right arrow keys and Backspace key can be used, in command mode, to edit the typed command.
+
+4. Pressing ESC in normal mode will terminate the application.
+
+5. The error displayed on the status bar, in case some anomaly occurs, will be removed automatically
+   on the next key input by the user.
