@@ -327,6 +327,11 @@ void enter_command_mode()
             search_str = command[1];
             content_list.clear();
             nftw(working_dir.c_str(), search_cb, ftw_max_fd, 0);
+            if(content_list.empty())
+            {
+                status_print("No match found!!");
+                continue;
+            }
             is_search_content = true;
             stack_clear(fwd_stack);
             break;
