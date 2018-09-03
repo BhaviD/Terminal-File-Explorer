@@ -262,12 +262,18 @@ void enter_command_mode()
                 status_print(command[1] + " doesn't exist!!");
                 continue;
             }
+            if(dest_path[dest_path.length() - 1] != '/')
+                dest_path = dest_path + "/";
+
+            if(dest_path == working_dir)
+            {
+                status_print("Current directory and Destination directory are the same!!");
+                continue;
+            }
             stack_clear(fwd_stack);
             bwd_stack.push(working_dir);
 
             working_dir = dest_path;
-            if(working_dir[working_dir.length() - 1] != '/')
-                working_dir = working_dir + "/";
             display_refresh();
         }
         else if(command[0] == "search")

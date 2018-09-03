@@ -463,7 +463,7 @@ int enter_normal_mode()
                     while(!done)
                     {
                         screen_clear();
-                        cout << "\033[1;31m" << "Exit File Explorer? [y/n]: " << "\033[0m";
+                        cout << "\033[1;33;40m" << "Exit File Explorer? (y/n):" << "\033[0m" << " ";
                         ch = next_input_char_get();
                         switch(ch)
                         {

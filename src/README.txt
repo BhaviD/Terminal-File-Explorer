@@ -10,7 +10,10 @@
 
 3. Left-Right arrow keys and Backspace key can be used, in command mode, to edit the typed command.
 
-4. Pressing ESC in normal mode will terminate the application.
+4. Pressing ESC in normal mode will ask the user to confirm termination of the application.
 
-5. The error displayed on the status bar, in case some anomaly occurs, will be removed automatically
+5. In command mode, the error displayed on the status bar (in case some anomaly occurs) will be removed automatically
    on the next key input by the user.
+
+6. Try to reach above the root directory will result in going to the root directory.
+  E.g. Doing "goto ~/../../../" will result in going to the root directory.
